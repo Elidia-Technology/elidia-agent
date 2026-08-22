@@ -1,0 +1,5 @@
+name: aiutils-provider
+kind: model-provider
+version: 1.0.0
+description: AiUtils Developer API (OpenAI-compatible chat + DT-credit billing)
+author: AiUtils.io

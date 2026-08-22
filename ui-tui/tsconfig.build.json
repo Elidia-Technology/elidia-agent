@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@elidia/ink": ["src/types/elidia-ink.d.ts"]
+    }
+  }
+}

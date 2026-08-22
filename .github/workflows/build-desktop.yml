@@ -1,0 +1,166 @@
+name: Build Elidia Agent Desktop
+
+# Builds the Electron desktop app (apps/desktop) for macOS, Windows, and Linux,
+# then uploads the installers to the production download host (aiutils.io).
+#
+# Source lives on GitLab; this workflow runs on the GitHub mirror
+# (Elidia-Technology/elidia-agent) which is the build + release channel.
+#
+# Required secrets (GitHub -> Settings -> Secrets and variables -> Actions):
+#   PROD_DEPLOY_KEY : private key of a dedicated deploy keypair whose public key
+#                     is in the prod server's authorized_keys (scoped to upload).
+#   PROD_HOST       : e.g. 167.86.89.198
+#   PROD_USER       : e.g. aiutils
+#
+# NOTE: signing/notarization (mac hardenedRuntime + afterSign notarize.cjs,
+#       Windows code signing) is intentionally NOT wired here yet. This produces
+#       unsigned installers; signing is a follow-up once certs are provisioned.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'apps/desktop/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/build-desktop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-mac:
+    name: macOS (dmg + zip)
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build (unsigned)
+        working-directory: apps/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ELIDIA_SKIP_NOTARIZE: '1'
+        run: npm run dist:mac
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: desktop-mac
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+          if-no-files-found: error
+
+  build-win:
+    name: Windows (nsis + msi)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build (unsigned)
+        working-directory: apps/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist:win
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: desktop-win
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.msi
+          if-no-files-found: error
+
+  build-linux:
+    name: Linux (AppImage + deb + rpm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install system deps for deb/rpm/AppImage packaging
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm fakeroot
+      - name: Install dependencies
+        run: npm ci
+      - name: Build (unsigned)
+        working-directory: apps/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist:linux
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: desktop-linux
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.rpm
+          if-no-files-found: error
+
+  upload-prod:
+    name: Upload installers to production
+    needs: [build-mac, build-win, build-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download mac artifacts
+        uses: actions/download-artifact@7a1cd3216ca9260cd8022db641d960b1db4d1be4  # v4
+        with:
+          name: desktop-mac
+          path: artifacts/mac
+      - name: Download win artifacts
+        uses: actions/download-artifact@7a1cd3216ca9260cd8022db641d960b1db4d1be4  # v4
+        with:
+          name: desktop-win
+          path: artifacts/win
+      - name: Download linux artifacts
+        uses: actions/download-artifact@7a1cd3216ca9260cd8022db641d960b1db4d1be4  # v4
+        with:
+          name: desktop-linux
+          path: artifacts/linux
+
+      - name: Normalize to stable -latest- filenames
+        run: |
+          set -euo pipefail
+          cd artifacts
+          # macOS -> Elidia-Agent-latest-macOS.dmg
+          find mac -name '*.dmg' ! -name '*.blockmap' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-macOS.dmg
+          # Windows -> Elidia-Agent-latest-windows.{exe,msi}
+          find win -name '*.exe' ! -name '*.blockmap' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-windows.exe
+          find win -name '*.msi' ! -name '*.blockmap' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-windows.msi
+          # Linux -> Elidia-Agent-latest-linux.{AppImage,deb,rpm}
+          find linux -name '*.AppImage' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-linux.AppImage
+          find linux -name '*.deb' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-linux.deb
+          find linux -name '*.rpm' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-linux.rpm
+          ls -la Elidia-Agent-latest-*
+
+      - name: Upload to production via SCP
+        env:
+          PROD_DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "$PROD_DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            artifacts/Elidia-Agent-latest-* \
+            "${PROD_USER}@${PROD_HOST}:/var/www/aiutils.io/frontend/public/downloads/"
