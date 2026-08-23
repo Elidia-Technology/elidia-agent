@@ -264,3 +264,45 @@ jobs:
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             artifacts/Elidia-Agent-latest-* \
             "${PROD_USER}@${PROD_HOST}:/var/www/aiutils.io/frontend/public/downloads/"
+
+          # public/ is Vite's SOURCE directory — it is copied into dist/ at
+          # build time, and nginx serves dist/. Uploading to public/ alone means
+          # the files sit on disk unserved until someone runs a frontend build,
+          # so this job reported success while users kept getting the previous
+          # release. Verified: an upload at 22:30 left the served files dated
+          # 19:05.
+          #
+          # Copy into dist/ as well so the release is live immediately, and keep
+          # the public/ copy so the next frontend build does not drop it.
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${PROD_USER}@${PROD_HOST}" \
+            'set -e
+             cd /var/www/aiutils.io/frontend
+             mkdir -p dist/downloads
+             cp -f public/downloads/Elidia-Agent-latest-* dist/downloads/
+             ls -la dist/downloads/ | head -20'
+
+      # Prove the release is actually reachable. A range request is the only
+      # honest check here: this site answers ANY unknown /downloads/ path with
+      # HTTP 200 and the SPA shell, so a missing file looks like a successful
+      # download of an 8KB HTML page named .dmg.
+      - name: Verify the published files are real
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in Elidia-Agent-latest-macOS-x64.dmg \
+                   Elidia-Agent-latest-macOS-arm64.dmg \
+                   Elidia-Agent-latest-linux.deb \
+                   Elidia-Agent-latest-linux.AppImage \
+                   Elidia-Agent-latest-windows.exe \
+                   Elidia-Agent-latest-windows.msi; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -r 0-100 \
+              "https://aiutils.io/downloads/$f" || echo 000)
+            if [ "$code" = "206" ]; then
+              echo "ok   $f"
+            else
+              echo "::error::$f is not a real download (HTTP $code — SPA fallback)"
+              fail=1
+            fi
+          done
+          exit $fail
