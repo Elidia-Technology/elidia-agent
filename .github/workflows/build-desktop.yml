@@ -152,25 +152,42 @@ jobs:
       # The .deb shipped for months declaring nine dependencies while the binary
       # linked against eleven. apt install succeeded and the app would not
       # start. ldd against ONLY the declared set is what catches that.
+      # The .deb shipped for months declaring nine dependencies while the binary
+      # linked against eleven. apt install succeeded and the app would not
+      # start. Installing ONLY the declared set and running ldd is what catches
+      # that.
+      #
+      # The check lives in a file rather than inline: an earlier version
+      # embedded it as a double-quoted docker bash -c string, and the escaping
+      # through YAML -> shell -> docker-bash broke. A file has one level of
+      # quoting and can be run locally, unchanged.
       - name: Verify .deb declares every library the binary needs
         run: |
           set -euo pipefail
-          cd apps/desktop/release
-          DEB=$(ls *.deb | head -1)
-          DEPS=$(dpkg-deb -f "$DEB" Depends | tr ',' ' ')
+          cat > /tmp/deb-check.sh <<'CHECK'
+          set -eu
+          apt-get update -qq >/dev/null 2>&1
+          apt-get install -y -qq --no-install-recommends dpkg-dev >/dev/null 2>&1
+          DEPS=$(dpkg-deb -f /w/package.deb Depends | tr ',' ' ')
           echo "declared: $DEPS"
-          docker run --rm -v "$PWD:/w" -w /w ubuntu:24.04 bash -c "
-            set -e
-            apt-get update -qq >/dev/null
-            apt-get install -y -qq --no-install-recommends $DEPS >/dev/null 2>&1 || true
-            missing=\$(ldd squashfs-root/Elidia 2>/dev/null | grep 'not found' || true)
-            if [ -n \"\$missing\" ]; then
-              echo '::error::.deb does not declare every needed library:'
-              echo \"\$missing\"
-              exit 1
-            fi
-            echo 'every linked library is covered by the declared Depends'
-          "
+          apt-get install -y -qq --no-install-recommends $DEPS >/dev/null 2>&1 || true
+          missing=$(ldd /w/squashfs-root/Elidia 2>/dev/null | grep 'not found' || true)
+          if [ -n "$missing" ]; then
+            echo "::error::.deb does not declare every library the binary needs:"
+            echo "$missing"
+            exit 1
+          fi
+          echo "every linked library is covered by the declared Depends"
+          CHECK
+          cd apps/desktop/release
+          cp "$(ls *.deb | head -1)" package.deb
+          test -d squashfs-root || { echo "::error::no squashfs-root — the AppImage step should have extracted it"; exit 1; }
+          # 22.04 on purpose: it is what the download page states as the target
+          # ("Ubuntu 22.04+ / Debian 12+") and it is the naming the Depends use.
+          # 24.04 renamed libasound2 and libatspi2.0-0 to t64 variants, so testing
+          # there reports failures that do not exist for the users we target.
+          docker run --rm -v "$PWD:/w" -v /tmp/deb-check.sh:/deb-check.sh ubuntu:22.04 sh /deb-check.sh
+          rm -f package.deb
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1

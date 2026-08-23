@@ -248,7 +248,8 @@
         "libsecret-1-0",
         "libgbm1",
         "libasound2",
-        "libdrm2"
+        "libdrm2",
+        "libxkbcommon0"
       ]
     },
     "rpm": {
@@ -264,7 +265,8 @@
         "libsecret",
         "mesa-libgbm",
         "alsa-lib",
-        "libdrm"
+        "libdrm",
+        "libxkbcommon"
       ]
     }
   }
