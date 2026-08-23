@@ -18,8 +18,8 @@ import {
   BUILTIN_THEMES,
   DEFAULT_SKIN_NAME,
   DEFAULT_TYPOGRAPHY,
-  SKIN_ALIASES,
-  elidiaTheme
+  elidiaTheme,
+  SKIN_ALIASES
 } from './presets'
 import type { DesktopTheme, DesktopThemeColors } from './types'
 

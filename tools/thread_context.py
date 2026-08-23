@@ -26,6 +26,21 @@ returned callable as the worker's target::
     # or
     executor.submit(propagate_context_to_thread(worker_fn), *args)
 
+**One wrapper per worker.** The returned callable holds a single captured
+``Context``, and a ``Context`` cannot be entered twice concurrently — reusing
+one wrapper across two workers raises ``RuntimeError: cannot enter context: ...
+is already entered``. Wrap inside the submit loop, never outside it::
+
+    for args in work:                                    # correct
+        executor.submit(propagate_context_to_thread(fn), *args)
+
+    worker = propagate_context_to_thread(fn)             # WRONG
+    executor.map(worker, work)
+
+Capturing per call instead would not fix this: the point is to snapshot the
+PARENT's context, and by the time the worker runs, the current context is the
+worker thread's own empty one.
+
 Approval/sudo callbacks are installed for the worker's lifetime and **always
 cleared on exit**, so a recycled thread never holds a stale reference to a
 disposed CLI instance.

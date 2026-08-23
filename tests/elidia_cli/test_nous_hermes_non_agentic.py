@@ -1,11 +1,12 @@
-"""Tests for the Hermes-3/4 non-agentic warning detector.
+"""Tests for the Nous-Hermes-3/4 non-agentic warning detector.
 
 Prior to this check, the warning fired on any model whose name contained
 ``"hermes"`` anywhere (case-insensitive). That false-positived on unrelated
 local Modelfiles such as ``hermes-brain:qwen3-14b-ctx16k`` — a tool-capable
 Qwen3 wrapper that happens to live under the "hermes" tag namespace.
 
-``is_elidia_non_agentic`` should only match the actual Hermes-3 / Hermes-4 chat family.
+``is_elidia_non_agentic`` should only match the actual Nous Research
+Hermes-3 / Hermes-4 chat family.
 """
 
 from __future__ import annotations
@@ -22,22 +23,22 @@ from elidia_cli.model_switch import (
 @pytest.mark.parametrize(
     "model_name",
     [
-        "Hermes-3-Llama-3.1-70B",
-        "Hermes-3-Llama-3.1-405B",
+        "NousResearch/Hermes-3-Llama-3.1-70B",
+        "NousResearch/Hermes-3-Llama-3.1-405B",
         "hermes-3",
         "Hermes-3",
         "hermes-4",
         "hermes-4-405b",
         "hermes_4_70b",
         "openrouter/hermes3:70b",
-        "openrouter/hermes-4-405b",
-        "Hermes3",
+        "openrouter/nousresearch/hermes-4-405b",
+        "NousResearch/Hermes3",
         "hermes-3.1",
     ],
 )
 def test_matches_real_elidia_chat_models(model_name: str) -> None:
     assert is_elidia_non_agentic(model_name), (
-        f"expected {model_name!r} to be flagged as Hermes 3/4"
+        f"expected {model_name!r} to be flagged as Nous Hermes 3/4"
     )
     assert _check_elidia_model_warning(model_name) == _ELIDIA_MODEL_WARNING
 
@@ -62,7 +63,7 @@ def test_matches_real_elidia_chat_models(model_name: str) -> None:
         # Non-chat Hermes models we don't warn about
         "hermes-llm-2",
         "hermes2-pro",
-        "hermes-2-mistral",
+        "nous-hermes-2-mistral",
         # Edge cases
         "",
         "hermes",  # bare "hermes" isn't the 3/4 family
@@ -72,7 +73,7 @@ def test_matches_real_elidia_chat_models(model_name: str) -> None:
 )
 def test_does_not_match_unrelated_models(model_name: str) -> None:
     assert not is_elidia_non_agentic(model_name), (
-        f"expected {model_name!r} NOT to be flagged as Hermes 3/4"
+        f"expected {model_name!r} NOT to be flagged as Nous Hermes 3/4"
     )
     assert _check_elidia_model_warning(model_name) == ""
 

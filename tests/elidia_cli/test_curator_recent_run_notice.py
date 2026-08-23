@@ -28,17 +28,21 @@ def curator_env(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
     import elidia_constants
-    importlib.reload(elidia_constants)
     from agent import curator
-    importlib.reload(curator)
     from elidia_cli import main as elidia_main
-    importlib.reload(elidia_main)
+    from tests.elidia_cli.conftest import temporarily_reloaded
 
-    yield {
-        "curator": curator,
-        "main": elidia_main,
-        "capsys": capsys,
-    }
+    # Reload to pick up the fresh ELIDIA_HOME, and put the original namespaces
+    # back afterwards. Leaving them reloaded replaced every class in
+    # elidia_cli.main with a new object, so later `isinstance(x, SomeClass)`
+    # checks in other modules compared two identically-named classes and
+    # returned False — see the helper's docstring.
+    with temporarily_reloaded(elidia_constants, curator, elidia_main):
+        yield {
+            "curator": curator,
+            "main": elidia_main,
+            "capsys": capsys,
+        }
 
 
 def _set_state(curator_mod, **fields):

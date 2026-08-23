@@ -51,19 +51,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _ELIDIA_MODEL_WARNING = (
-    "Hermes 3 & 4 models are NOT agentic and are not designed "
+    "Nous Research Hermes 3 & 4 models are NOT agentic and are not designed "
     "for use with Elidia Agent. They lack the tool-calling capabilities "
     "required for agent workflows. Consider using an agentic model instead "
     "(Claude, GPT, Gemini, DeepSeek, etc.)."
 )
 
-# Match only the Hermes 3 / Hermes 4 chat families.
+# Match only the real Nous Research Hermes 3 / Hermes 4 chat families.
 # The previous substring check (`"hermes" in name.lower()`) false-positived on
 # unrelated local Modelfiles like ``hermes-brain:qwen3-14b-ctx16k`` that just
 # happen to carry "hermes" in their tag but are fully tool-capable.
 #
 # Positive examples the regex must match:
-#   Hermes-3-Llama-3.1-70B, hermes-4-405b, openrouter/hermes3:70b
+#   NousResearch/Hermes-3-Llama-3.1-70B, hermes-4-405b, openrouter/hermes3:70b
 # Negative examples it must NOT match:
 #   hermes-brain:qwen3-14b-ctx16k, qwen3:14b, claude-opus-4-6
 _ELIDIA_NON_AGENTIC_RE = re.compile(
@@ -73,7 +73,7 @@ _ELIDIA_NON_AGENTIC_RE = re.compile(
 
 
 def is_elidia_non_agentic(model_name: str) -> bool:
-    """Return True if *model_name* is a real Hermes 3/4 chat model.
+    """Return True if *model_name* is a real Nous Hermes 3/4 chat model.
 
     Used to decide whether to surface the non-agentic warning at startup.
     Callers in :mod:`cli.py` and here should go through this single helper
@@ -85,7 +85,7 @@ def is_elidia_non_agentic(model_name: str) -> bool:
 
 
 def _check_elidia_model_warning(model_name: str) -> str:
-    """Return a warning string if *model_name* is a Hermes 3/4 chat model."""
+    """Return a warning string if *model_name* is a Nous Hermes 3/4 chat model."""
     if is_elidia_non_agentic(model_name):
         return _ELIDIA_MODEL_WARNING
     return ""

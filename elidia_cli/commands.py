@@ -55,6 +55,19 @@ class CommandDef:
     cli_only: bool = False             # only available in CLI
     gateway_only: bool = False         # only available in gateway/messaging
     gateway_config_gate: str | None = None  # config dotpath; when truthy, overrides cli_only for gateway
+    # Surface this command in the platforms' native slash/menu registries.
+    #
+    # Slack allows only 50 native slash commands per app and the registry sits
+    # exactly at that ceiling, so every addition silently evicts an existing
+    # alias — adding /link dropped /q. A command run once during setup does not
+    # deserve a slot a frequently typed alias is using.
+    #
+    # Applies to Telegram as well as Slack, deliberately: test_telegram_parity
+    # enforces that the two platforms expose the same set, and an opt-out on one
+    # side only would break that invariant. Opting out affects DISCOVERY only —
+    # the command still dispatches when typed, because the gateway resolves it
+    # through COMMAND_REGISTRY rather than through what a platform registered.
+    native_slash: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +156,18 @@ COMMAND_REGISTRY: list[CommandDef] = [
                subcommands=("on", "off", "status")),
     CommandDef("yolo", "Toggle YOLO mode (skip all dangerous command approvals)",
                "Configuration"),
+    # gateway_only: on the CLI the key belongs in the OS keychain via
+    # `elidia key store`, not attached to a platform identity that does not
+    # exist there.
+    CommandDef("link", "Link your own AiUtils API key so usage bills your DT wallet",
+               "Configuration", gateway_only=True,
+               args_hint="[ak-dev-… | off]",
+               subcommands=("off",),
+               # Discovery only: still works when typed. Kept out of the native
+               # menus so it does not evict a frequently used alias from Slack's
+               # 50-slash ceiling, and because a bot's autocomplete listing
+               # "paste your API key" invites people to do it in a group.
+               native_slash=False),
     CommandDef("reasoning", "Manage reasoning effort and display", "Configuration",
                args_hint="[level|show|hide]",
                subcommands=("none", "minimal", "low", "medium", "high", "xhigh", "show", "hide", "on", "off")),
@@ -494,7 +519,7 @@ def telegram_bot_commands() -> list[tuple[str, str]]:
     overrides = _resolve_config_gates()
     result: list[tuple[str, str]] = []
     for cmd in COMMAND_REGISTRY:
-        if not _is_gateway_available(cmd, overrides):
+        if not _is_gateway_available(cmd, overrides) or not cmd.native_slash:
             continue
         # Built-in arg-taking commands are included — their handlers show
         # usage text when invoked without arguments, and hiding them from
@@ -1073,13 +1098,13 @@ def slack_native_slashes() -> list[tuple[str, str, str]]:
 
     # First pass: canonical names (so they win slots if we hit the cap).
     for cmd in COMMAND_REGISTRY:
-        if not _is_gateway_available(cmd, overrides):
+        if not _is_gateway_available(cmd, overrides) or not cmd.native_slash:
             continue
         _add(cmd.name, cmd.description, cmd.args_hint or "")
 
     # Second pass: aliases.
     for cmd in COMMAND_REGISTRY:
-        if not _is_gateway_available(cmd, overrides):
+        if not _is_gateway_available(cmd, overrides) or not cmd.native_slash:
             continue
         for alias in cmd.aliases:
             # Skip aliases that only differ from canonical by case/punctuation

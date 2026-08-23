@@ -2,7 +2,7 @@
   "name": "elidia",
   "productName": "Elidia Agent",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.10",
   "description": "Native desktop shell for Elidia Agent.",
   "author": "AiUtils",
   "homepage": "https://aiutils.io",
@@ -24,7 +24,7 @@
     "builder": "cross-env NODE_OPTIONS=--max-old-space-size=16384 electron-builder",
     "pack": "npm run build && npm run builder -- --dir",
     "dist": "npm run build && npm run builder",
-    "dist:mac": "npm run build && npm run builder -- --mac",
+    "dist:mac": "npm run build && npm run builder -- --mac --x64 --arm64",
     "dist:mac:dmg": "npm run build && npm run builder -- --mac dmg",
     "dist:mac:zip": "npm run build && npm run builder -- --mac zip",
     "dist:win": "npm run build && npm run builder -- --win",
@@ -234,6 +234,38 @@
       "shortcutName": "Elidia Agent",
       "uninstallDisplayName": "Elidia Agent",
       "warningsAsErrors": false
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "libgbm1",
+        "libasound2",
+        "libdrm2"
+      ]
+    },
+    "rpm": {
+      "depends": [
+        "gtk3",
+        "libnotify",
+        "nss",
+        "libXScrnSaver",
+        "libXtst",
+        "xdg-utils",
+        "at-spi2-atk",
+        "libuuid",
+        "libsecret",
+        "mesa-libgbm",
+        "alsa-lib",
+        "libdrm"
+      ]
     }
   }
 }

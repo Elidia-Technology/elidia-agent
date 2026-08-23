@@ -21,6 +21,23 @@ logger = logging.getLogger(__name__)
 from tools import aiutils_client
 from tools.registry import registry, tool_error
 
+
+def _learn_cost(client, key: str) -> None:
+    """Record what the call that just ran actually cost.
+
+    The gateway reports it on every response (X-DT-Consumed); without this it
+    was read and dropped, so a tool the pricing catalog cannot quote stayed
+    unpriceable forever no matter how many times the user paid for it.
+    Best-effort by design: a bookkeeping failure must never turn a successful,
+    already-billed call into an error.
+    """
+    try:
+        from tools import aiutils_cost_memory
+
+        aiutils_cost_memory.record_from_client(key, client)
+    except Exception as exc:  # pragma: no cover - never load-bearing
+        logger.debug("Could not record observed cost for %s: %s", key, exc)
+
 GENERATE_SCHEMA = {
     "name": "aiutils_generate",
     "description": (
@@ -104,7 +121,12 @@ def _handle_generate(args, **kw):
         )
     except Exception as exc:
         logger.warning("aiutils_generate failed: %s", exc)
-        return tool_error(f"Generation failed: {exc}")
+        handled = aiutils_client.handle_sdk_error(exc, action="generation")
+        return tool_error(handled or f"Generation failed: {exc}")
+
+    from tools.aiutils_cost_memory import model_key
+
+    _learn_cost(client, model_key(model))
 
     return json.dumps(
         {
@@ -131,7 +153,8 @@ def _handle_estimate(args, **kw):
         balance = client.wallet.balance()
     except Exception as exc:
         logger.warning("aiutils_estimate failed: %s", exc)
-        return tool_error(f"Estimate failed: {exc}")
+        handled = aiutils_client.handle_sdk_error(exc, action="cost estimate")
+        return tool_error(handled or f"Estimate failed: {exc}")
 
     return json.dumps(
         {
@@ -153,7 +176,8 @@ def _handle_generation_get(args, **kw):
         result = client.generations.get(generation_id)
     except Exception as exc:
         logger.warning("aiutils_generation_get failed: %s", exc)
-        return tool_error(f"Could not fetch generation: {exc}")
+        handled = aiutils_client.handle_sdk_error(exc, action="generation lookup")
+        return tool_error(handled or f"Could not fetch generation: {exc}")
 
     return json.dumps(
         {

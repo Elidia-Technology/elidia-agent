@@ -137,7 +137,11 @@ scripts/out/
 # committed to the repo root. See the elidia-release skill.
 RELEASE_v*.md
 CLAUDE.md
-AGENTS.md
 # Project instructions + local agent config — never in the public mirror
 .envrc
 .claude/
+
+# VS Code extension build output
+apps/vscode/out/
+apps/vscode/node_modules/
+apps/vscode/*.vsix

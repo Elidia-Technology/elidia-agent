@@ -11,6 +11,28 @@ from unittest.mock import patch
 import pytest
 
 
+
+
+def _drop_config_module_cache() -> None:
+    """Force elidia_cli.config to re-read config.yaml on the next call.
+
+    Three tests below write a fresh config.yaml and need the next read to see
+    it. They used to do that by deleting elidia_cli.config from sys.modules,
+    which works but leaves the module absent: the next import builds a NEW
+    module object while everything already imported keeps the old one, and a
+    later monkeypatch by string path then patches the wrong copy. That is the
+    same identity split as c4fd16e and 280a002.
+
+    Clearing the caches is what those tests actually wanted. They are keyed by
+    (path, mtime, size), so they normally self-invalidate — but two writes
+    inside one filesystem timestamp tick can look unchanged, which is the case
+    these tests hit. No sys.modules surgery, so no identity split is possible.
+    """
+    from elidia_cli import config as _config
+
+    _config._LOAD_CONFIG_CACHE.clear()
+    _config._RAW_CONFIG_CACHE.clear()
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -1529,10 +1551,7 @@ class TestRunPreUpdateBackup:
             "_config_version": 22,
             "updates": {"pre_update_backup": True},
         }))
-        import sys as _sys
-        for mod in list(_sys.modules.keys()):
-            if mod.startswith("elidia_cli.config"):
-                del _sys.modules[mod]
+        _drop_config_module_cache()
 
         from elidia_cli.main import _run_pre_update_backup
         _run_pre_update_backup(Namespace(no_backup=False, backup=False))
@@ -1551,10 +1570,7 @@ class TestRunPreUpdateBackup:
             "updates": {"pre_update_backup": False},
         }))
         # Ensure config module re-reads
-        import sys as _sys
-        for mod in list(_sys.modules.keys()):
-            if mod.startswith("elidia_cli.config"):
-                del _sys.modules[mod]
+        _drop_config_module_cache()
 
         from elidia_cli.main import _run_pre_update_backup
         _run_pre_update_backup(Namespace(no_backup=False, backup=False))
@@ -1570,10 +1586,7 @@ class TestRunPreUpdateBackup:
             "_config_version": 22,
             "updates": {"pre_update_backup": True},
         }))
-        import sys as _sys
-        for mod in list(_sys.modules.keys()):
-            if mod.startswith("elidia_cli.config"):
-                del _sys.modules[mod]
+        _drop_config_module_cache()
 
         from elidia_cli.main import _run_pre_update_backup
         _run_pre_update_backup(Namespace(no_backup=True, backup=False))

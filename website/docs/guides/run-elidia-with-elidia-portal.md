@@ -118,9 +118,15 @@ Pick a different default permanently:
 elidia config set model.default anthropic/claude-sonnet-4.6
 ```
 
-### Don't pick Hermes-4 for agent work
+### Don't pick a chat-tuned model for agent work
 
-Hermes-4-70B and Hermes-4-405B are available on the Portal at deep discounts, but they're **chat/reasoning models**, not tool-call-tuned. They will struggle with multi-step agent loops. Use them via [Elidia Chat](https://chat.aiutils.io) for conversation/research work, or through the [subscription proxy](/user-guide/features/subscription-proxy) from non-agent tools. For Elidia Agent itself, stick to the frontier agentic models above.
+Some catalog models — `hermes-4-70b` and `hermes-4-405b` among them — are
+chat/reasoning models rather than tool-call-tuned, and they are cheap through
+the Portal for exactly that use. They will struggle with multi-step agent loops.
+Use them via [Elidia Chat](https://chat.aiutils.io) for conversation and research
+work, or through the [subscription proxy](/user-guide/features/subscription-proxy)
+from non-agent tools. For Elidia Agent itself, stick to the frontier agentic
+models above.
 
 The Portal's own [info page](https://developer.aiutils.io/info) carries this warning too — it's the official Elidia guidance, not just an Elidia-side opinion.
 

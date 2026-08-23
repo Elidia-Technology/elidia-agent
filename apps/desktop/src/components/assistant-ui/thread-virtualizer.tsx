@@ -66,6 +66,7 @@ const VirtualizedThreadInner: FC<VirtualizedThreadProps> = ({
   const messageSignature = useAuiState(s =>
     s.thread.messages.map((message, index) => `${index}:${message.id}:${message.role}`).join('\n')
   )
+
   const isRunning = useAuiState(s => s.thread.isRunning)
 
   const groups = useMemo(() => buildGroups(messageSignature), [messageSignature])
@@ -93,6 +94,7 @@ const VirtualizedThreadInner: FC<VirtualizedThreadProps> = ({
     // then jumps back up).
     scrollToFn: (offset, _options, instance) => {
       const el = instance.scrollElement
+
       if (!el) {
         return
       }
@@ -317,6 +319,7 @@ function useThreadScrollAnchor({
       // their own listeners below, so real user intent remains covered.
       const heightGrew = el.scrollHeight > lastHeightRef.current
       const clientHeightChanged = Math.abs(el.clientHeight - lastClientHeightRef.current) > 1
+
       if (!heightGrew && !clientHeightChanged && top + 1 < lastTopRef.current) {
         stickyBottomRef.current = false
       }
@@ -369,13 +372,16 @@ function useThreadScrollAnchor({
     }
 
     let pinRafScheduled = false
+
     const schedulePin = () => {
       if (pinRafScheduled || !stickyBottomRef.current) {
         return
       }
+
       pinRafScheduled = true
       requestAnimationFrame(() => {
         pinRafScheduled = false
+
         if (stickyBottomRef.current) {
           pinToBottom()
         }
@@ -429,6 +435,7 @@ function useThreadScrollAnchor({
     if (!enabled) {
       return
     }
+
     if (groupCount > prevGroupCountForLayoutRef.current && stickyBottomRef.current) {
       pinToBottom()
       requestAnimationFrame(() => {
@@ -437,6 +444,7 @@ function useThreadScrollAnchor({
         }
       })
     }
+
     prevGroupCountForLayoutRef.current = groupCount
   }, [enabled, groupCount, pinToBottom, stickyBottomRef])
 

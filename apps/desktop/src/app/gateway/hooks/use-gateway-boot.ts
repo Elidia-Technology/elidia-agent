@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 
-import type { ElidiaConnection } from '@/global'
 import { ElidiaGateway } from '@/elidia'
+import type { ElidiaConnection } from '@/global'
 import {
   $desktopBoot,
   applyDesktopBootProgress,
@@ -179,6 +179,7 @@ export function useGatewayBoot({
         scheduleReconnect()
       }
     })
+
     const offEvent = gateway.onEvent(event => callbacksRef.current.handleGatewayEvent(event))
 
     // Wake signals: power resume (macOS/Windows), network coming back, and the
@@ -186,6 +187,7 @@ export function useGatewayBoot({
     const offPowerResume = desktop.onPowerResume?.(() => reconnectNow())
 
     const onOnline = () => reconnectNow()
+
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         reconnectNow()

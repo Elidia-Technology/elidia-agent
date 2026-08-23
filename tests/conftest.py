@@ -74,6 +74,38 @@ _CREDENTIAL_SUFFIXES = (
 
 # Explicit names (for ones that don't fit the suffix pattern)
 _CREDENTIAL_NAMES = frozenset({
+    # ── Credentials ending in a bare "_KEY" ────────────────────────────
+    # The suffix list above matches "_API_KEY" but not "_KEY", so these were
+    # never scrubbed. That mattered most for ELIDIA_KEY: it is the PRIMARY
+    # AiUtils credential name (aiutils_client.API_KEY_ENV_VARS[0]) while its
+    # two aliases — ELIDIA_API_KEY, AIUTILS_API_KEY — were both caught, so the
+    # hole was invisible. And load_elidia_dotenv() reads ~/.elidia/.env into
+    # os.environ at *import* time, so on any developer machine a live key was
+    # present for the entire run: provider auto-detect tests silently took the
+    # "a key is configured" branch, and a spendable production credential sat
+    # in reach of every test that touches a real code path.
+    #
+    # Listed by name rather than by adding a blanket "_KEY" suffix: that would
+    # also swallow the fixture names tests set for themselves (MY_KEY, NEW_KEY,
+    # VALID_KEY, DOOMED_KEY, ...), which is harmless today but turns the scrub
+    # list into a trap for the next non-credential *_KEY var someone adds.
+    "ELIDIA_KEY",
+    "ELIDIA_SESSION_KEY",
+    "ELIDIA_MEET_REALTIME_KEY",
+    "ELIDIA_LANGFUSE_PUBLIC_KEY",
+    "ELIDIA_LANGFUSE_SECRET_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "FAL_KEY",
+    "VOICE_TOOLS_OPENAI_KEY",
+    "AZURE_ANTHROPIC_KEY",
+    "GATEWAY_PROXY_KEY",
+    "API_SERVER_KEY",
+    "ALPHA_VANTAGE_KEY",
+    "MATRIX_RECOVERY_KEY",
+    "CAMOFOX_SESSION_KEY",
+    "YUANBAO_APP_KEY",
+    "TERMINAL_SSH_KEY",
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
@@ -525,6 +557,87 @@ def _ensure_current_event_loop(request):
 _LIVE_SYSTEM_GUARD_BYPASS_MARK = "live_system_guard_bypass"
 
 
+@pytest.fixture(autouse=True)
+def _restore_environ():
+    """Undo environment changes made by the CODE UNDER TEST, not just the test.
+
+    ``monkeypatch`` restores what a test sets. Nothing restored what the code it
+    calls sets — and production code writes 81 distinct variables into
+    ``os.environ`` across elidia_cli/, agent/, tools/ and gateway/:
+    ELIDIA_YOLO_MODE, ELIDIA_IGNORE_USER_CONFIG, ELIDIA_IGNORE_RULES,
+    ELIDIA_KANBAN_BOARD, ELIDIA_DEFER_AGENT_STARTUP, ELIDIA_SESSION_SOURCE,
+    ELIDIA_HOME and more.
+
+    So one test that reached a branch setting ELIDIA_DEFER_AGENT_STARTUP changed
+    which path ``main()`` took for every test after it. That is why the
+    remaining order-dependent failures cluster in config- and env-sensitive
+    files — test_setup, test_gmi_provider, test_portal_cli,
+    test_whatsapp_setup_ordering — and why every one of them passes alone.
+
+    Compared against a snapshot rather than restored unconditionally, so the
+    common case (nothing changed) costs one dict comparison.
+    """
+    snapshot = dict(os.environ)
+    try:
+        yield
+    finally:
+        if os.environ != snapshot:
+            os.environ.clear()
+            os.environ.update(snapshot)
+
+
+def _check_declared_dependencies():
+    """Warn once, up front, about declared dependencies that are not installed.
+
+    A missing dependency does not announce itself: ``ruamel.yaml`` was absent
+    from the venv and surfaced as 17 ModuleNotFoundError failures scattered
+    across test_migrate_xai.py, which reads as a broken test module rather than
+    a broken environment. One line at the top of the run is worth more than
+    seventeen tracebacks at the bottom.
+
+    A warning, not an error: some tests legitimately exercise the
+    dependency-missing path, and a hard failure here would make a stale venv
+    look like a broken suite — the exact confusion this is meant to remove.
+
+    Checks the DISTRIBUTION, never a guessed import name: "ruamel.yaml" imports
+    as ``ruamel.yaml`` but "python-dotenv" imports as ``dotenv``, and a mapping
+    table would go stale silently.
+    """
+    try:
+        import tomllib
+        from importlib.metadata import PackageNotFoundError, distribution
+        from pathlib import Path as _Path
+
+        from packaging.markers import default_environment
+        from packaging.requirements import Requirement
+    except Exception:
+        return []
+
+    pyproject = _Path(__file__).resolve().parents[1] / "pyproject.toml"
+    if not pyproject.is_file():
+        return []
+    try:
+        deps = tomllib.loads(pyproject.read_text())["project"]["dependencies"]
+    except Exception:
+        return []
+
+    env = default_environment()
+    missing = []
+    for raw in deps:
+        try:
+            req = Requirement(raw)
+            # Honour environment markers, so a win32-only dependency is not
+            # reported as missing on macOS.
+            if req.marker is not None and not req.marker.evaluate(env):
+                continue
+            distribution(req.name)
+        except PackageNotFoundError:
+            missing.append(raw)
+        except Exception:
+            continue
+    return missing
+
+
 def pytest_configure(config):  # noqa: D401 — pytest hook
     """Register markers used by hermetic conftest."""
     config.addinivalue_line(
@@ -533,6 +646,24 @@ def pytest_configure(config):  # noqa: D401 — pytest hook
         "(only for tests that genuinely need real os.kill / subprocess "
         "behaviour — e.g. PTY tests that signal their own child).",
     )
+
+    missing = _check_declared_dependencies()
+    if missing:
+        config.stash  # noqa: B018 — touch to keep linters quiet about the hook
+        reporter = config.pluginmanager.get_plugin("terminalreporter")
+        message = (
+            "Declared dependencies are NOT installed in this environment: "
+            + ", ".join(missing)
+            + "\n  Failures in modules that import them are environment, not code."
+            + "\n  Fix with:  pip install -e ."
+        )
+        if reporter is not None:
+            reporter.write_line("")
+            reporter.write_line(message, yellow=True, bold=True)
+        else:  # pragma: no cover — -p no:terminal
+            import warnings
+
+            warnings.warn(message, stacklevel=1)
 
 
 @pytest.fixture(autouse=True)

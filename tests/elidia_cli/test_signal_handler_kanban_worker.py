@@ -78,13 +78,23 @@ def _synthetic_worker_script() -> str:
     )
 
 
-def _is_alive_like_dispatcher(pid: int) -> bool:
-    """Mirrors elidia_cli/kanban_db.py:_pid_alive on Linux.
+def _is_alive_like_dispatcher(pid: int, proc: subprocess.Popen | None = None) -> bool:
+    """Mirrors elidia_cli/kanban_db.py:_pid_alive.
 
-    A zombie is treated as dead — the dispatcher's _pid_alive checks
-    /proc/<pid>/status for State: Z. We replicate that here so a clean
-    os._exit followed by zombie-state is correctly counted as dead.
+    A zombie is dead for our purposes — the dispatcher's _pid_alive checks
+    /proc/<pid>/status for State: Z.
+
+    That /proc check exists only on Linux, and this test spawns the process it
+    is watching, so on macOS the exited child sat un-reaped: ``os.kill(pid, 0)``
+    succeeds against a zombie, the loop never saw it die, and the test failed
+    with "fix regressed" on a fix that had not regressed at all.
+
+    Since we OWN this child, poll() is the authoritative answer and reaps it as
+    a side effect. The /proc path stays for parity with the dispatcher, which
+    watches processes it did not spawn and cannot poll.
     """
+    if proc is not None and proc.poll() is not None:
+        return False
     if pid <= 0:
         return False
     try:
@@ -154,7 +164,7 @@ def test_sigterm_with_kanban_task_env_terminates_quickly():
         # is immediate. Give generous headroom for slow CI runners.
         deadline = t0 + 2.0
         while time.time() < deadline:
-            if not _is_alive_like_dispatcher(proc.pid):
+            if not _is_alive_like_dispatcher(proc.pid, proc):
                 elapsed = time.time() - t0
                 assert elapsed < 2.0
                 return

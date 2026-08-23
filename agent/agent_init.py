@@ -395,6 +395,18 @@ def init_agent(
     agent.thinking_callback = thinking_callback
     agent.reasoning_callback = reasoning_callback
     agent.clarify_callback = clarify_callback
+    # Publish the same prompt ambiently so tools that spend money can confirm
+    # before charging (B5). Tool handlers are dispatched through
+    # handle_function_call -> registry.dispatch, neither of which receives the
+    # agent, so a billed tool has no other route to an interactive prompt.
+    # Absent a callback the spend guard fails closed rather than assuming
+    # consent. See tools/confirm_context.py.
+    try:
+        from tools.confirm_context import set_confirm_callback
+
+        set_confirm_callback(clarify_callback)
+    except Exception as _confirm_exc:  # never let this break agent startup
+        logger.debug("Could not publish confirm callback: %s", _confirm_exc)
     agent.step_callback = step_callback
     agent.stream_delta_callback = stream_delta_callback
     agent.interim_assistant_callback = interim_assistant_callback

@@ -7,6 +7,23 @@ import pytest
 from elidia_cli import relaunch as relaunch_mod
 
 
+@pytest.fixture(autouse=True)
+def _clean_argv(monkeypatch):
+    """Isolate these tests from the argv pytest itself was invoked with.
+
+    build_relaunch_argv() defaults to scanning ``sys.argv[1:]`` for flags to
+    carry across the relaunch, so under pytest it scanned PYTEST's argv. Run the
+    suite as ``pytest -p no:cacheprovider`` and elidia's own ``-p/--profile``
+    matched: the relaunch argv came out as ``-p no:cacheprovider --resume abc``
+    and three tests failed. Nothing was wrong with the code — the tests simply
+    passed or failed depending on how the runner happened to be invoked.
+
+    Individual tests that care about argv still set their own; this only
+    guarantees a clean baseline.
+    """
+    monkeypatch.setattr(sys, "argv", ["elidia"])
+
+
 class TestResolveElidiaBin:
     def test_prefers_absolute_argv0_when_executable(self, monkeypatch):
         fake = "/nix/store/abc/bin/elidia"

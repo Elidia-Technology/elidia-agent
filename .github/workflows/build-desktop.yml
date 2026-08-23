@@ -4,7 +4,7 @@ name: Build Elidia Agent Desktop
 # then uploads the installers to the production download host (aiutils.io).
 #
 # Source lives on GitLab; this workflow runs on the GitHub mirror
-# (Elidia-Technology/elidia-agent) which is the build + release channel.
+# (Elidia-Technology/elidia-agent-cli-v2) which is the build + release channel.
 #
 # Required secrets (GitHub -> Settings -> Secrets and variables -> Actions):
 #   PROD_DEPLOY_KEY : private key of a dedicated deploy keypair whose public key
@@ -48,6 +48,23 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           ELIDIA_SKIP_NOTARIZE: '1'
         run: npm run dist:mac
+      # The runner is Apple Silicon, so a bare `--mac` silently produced arm64
+      # only — and the download page told Intel users it would work for them.
+      # An Intel Mac cannot execute an arm64 binary at all; Rosetta translates
+      # x64 onto ARM, never the reverse.
+      - name: Verify both macOS architectures were built
+        run: |
+          set -euo pipefail
+          cd apps/desktop/release
+          for arch in x64 arm64; do
+            if ! ls *-mac-$arch.dmg >/dev/null 2>&1; then
+              echo "::error::no $arch dmg — half of macOS users would get a binary they cannot run"
+              ls -la
+              exit 1
+            fi
+            echo "found $(ls *-mac-$arch.dmg)"
+          done
+
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -104,6 +121,57 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run dist:linux
+      # Every Linux bug we have shipped sat between "the artifact exists" and
+      # "the artifact runs": a .deb that installed cleanly and then died on a
+      # missing libgbm.so.1, and a first-launch bootstrap that 404'd. Producing
+      # a file is not evidence. Launch it.
+      - name: Smoke-test the AppImage
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils \
+            libatspi2.0-0 libsecret-1-0 libasound2t64 libgbm1 libdrm2 xvfb
+          cd apps/desktop/release
+          APPIMAGE=$(ls *.AppImage | head -1)
+          chmod +x "$APPIMAGE"
+          ./"$APPIMAGE" --appimage-extract >/dev/null
+          set +e
+          APPDIR="$PWD/squashfs-root" timeout 20 xvfb-run -a \
+            ./squashfs-root/AppRun --no-sandbox > launch.log 2>&1
+          code=$?
+          set -e
+          # 124 means it was still running when timeout fired, which is what a
+          # GUI app should do. Anything else means it exited on its own.
+          if [ "$code" -ne 124 ]; then
+            echo "::error::AppImage exited with $code instead of staying up"
+            tail -40 launch.log
+            exit 1
+          fi
+          echo "AppImage stayed up for 20s"
+
+      # The .deb shipped for months declaring nine dependencies while the binary
+      # linked against eleven. apt install succeeded and the app would not
+      # start. ldd against ONLY the declared set is what catches that.
+      - name: Verify .deb declares every library the binary needs
+        run: |
+          set -euo pipefail
+          cd apps/desktop/release
+          DEB=$(ls *.deb | head -1)
+          DEPS=$(dpkg-deb -f "$DEB" Depends | tr ',' ' ')
+          echo "declared: $DEPS"
+          docker run --rm -v "$PWD:/w" -w /w ubuntu:24.04 bash -c "
+            set -e
+            apt-get update -qq >/dev/null
+            apt-get install -y -qq --no-install-recommends $DEPS >/dev/null 2>&1 || true
+            missing=\$(ldd squashfs-root/Elidia 2>/dev/null | grep 'not found' || true)
+            if [ -n \"\$missing\" ]; then
+              echo '::error::.deb does not declare every needed library:'
+              echo \"\$missing\"
+              exit 1
+            fi
+            echo 'every linked library is covered by the declared Depends'
+          "
+
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -140,8 +208,23 @@ jobs:
         run: |
           set -euo pipefail
           cd artifacts
-          # macOS -> Elidia-Agent-latest-macOS.dmg
-          find mac -name '*.dmg' ! -name '*.blockmap' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-macOS.dmg
+          # macOS -> one file PER ARCHITECTURE.
+          #
+          # This used to be `head -n1`, which was fine while only one dmg
+          # existed. Now that both are built it would pick whichever the shell
+          # listed first and silently drop the other — publishing, say, arm64 to
+          # every Mac user including Intel, which is the bug that started this.
+          for arch in x64 arm64; do
+            src=$(find mac -name "*-mac-$arch.dmg" ! -name '*.blockmap' | head -n1)
+            if [ -z "$src" ]; then
+              echo "::error::no $arch dmg to publish — half of macOS users would get nothing"
+              exit 1
+            fi
+            cp "$src" "Elidia-Agent-latest-macOS-$arch.dmg"
+          done
+          # Keep the unsuffixed name pointing at Apple Silicon for older links
+          # and bookmarks. New links on the download page are arch-explicit.
+          cp Elidia-Agent-latest-macOS-arm64.dmg Elidia-Agent-latest-macOS.dmg
           # Windows -> Elidia-Agent-latest-windows.{exe,msi}
           find win -name '*.exe' ! -name '*.blockmap' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-windows.exe
           find win -name '*.msi' ! -name '*.blockmap' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-windows.msi

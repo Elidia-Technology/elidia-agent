@@ -5,6 +5,8 @@ shared slash-command pipeline (`/model` in CLI/gateway/Telegram) historically
 only looked at `providers:`.
 """
 
+import pytest
+
 import elidia_cli.providers as providers_mod
 from elidia_cli.model_switch import list_authenticated_providers, switch_model
 from elidia_cli.providers import resolve_provider_full
@@ -16,6 +18,28 @@ _MOCK_VALIDATION = {
     "recognized": True,
     "message": None,
 }
+
+
+@pytest.fixture(autouse=True)
+def _no_live_model_discovery(monkeypatch):
+    """Stop these tests probing whatever happens to be listening on localhost.
+
+    list_authenticated_providers() calls fetch_api_models(api_key, api_url) for
+    any custom provider that has a key or no configured models. The fixtures
+    here point at http://localhost:11434/v1, so on a machine with Ollama running
+    the live catalog REPLACED the configured models and the assertions compared
+    against that machine's installed models — {qwen3:1.7b, deepseek-v3.1:671b-cloud}
+    instead of {glm-5.1, qwen3-coder}. It also made the module take ~90s, waiting
+    on connections to endpoints that do not exist.
+
+    Returning an empty list is the "endpoint told us nothing" branch, which is
+    what these tests were silently relying on — now deterministically, instead of
+    depending on what the developer has installed.
+    """
+    monkeypatch.setattr(
+        "elidia_cli.models.fetch_api_models",
+        lambda api_key, api_url, *a, **kw: [],
+    )
 
 
 def test_list_authenticated_providers_includes_custom_providers(monkeypatch):

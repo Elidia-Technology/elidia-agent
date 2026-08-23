@@ -2,7 +2,7 @@ import { type DragEvent as ReactDragEvent, useCallback, useRef, useState } from 
 
 import { dragHasAttachments } from '@/app/chat/composer/inline-refs'
 
-import { type DroppedFile, extractDroppedFiles, ELIDIA_PATHS_MIME } from './use-composer-actions'
+import { type DroppedFile, ELIDIA_PATHS_MIME, extractDroppedFiles } from './use-composer-actions'
 
 const hasFiles = (event: ReactDragEvent) => dragHasAttachments(event.dataTransfer, ELIDIA_PATHS_MIME)
 

@@ -37,7 +37,7 @@ import {
 import { $gatewayState, $messages } from '@/store/session'
 import { $threadScrolledUp } from '@/store/thread-scroll'
 
-import { extractDroppedFiles, ELIDIA_PATHS_MIME } from '../hooks/use-composer-actions'
+import { ELIDIA_PATHS_MIME, extractDroppedFiles } from '../hooks/use-composer-actions'
 
 import { AttachmentList } from './attachments'
 import { ContextMenu } from './context-menu'
@@ -157,6 +157,7 @@ export function ChatBar({
   const showHelpHint = draft === '?'
 
   const gatewayState = useStore($gatewayState)
+
   // When the bar is disabled it's because the gateway isn't open. Distinguish a
   // cold start ("Starting Elidia...") from a dropped connection we're trying to
   // restore (e.g. after the Mac slept) so the stuck state reads as recoverable.

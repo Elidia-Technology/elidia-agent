@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatRefValue, elidiaDirectiveFormatter } from './directive-text'
+import { elidiaDirectiveFormatter, formatRefValue } from './directive-text'
 
 describe('formatRefValue', () => {
   it('leaves simple paths untouched', () => {

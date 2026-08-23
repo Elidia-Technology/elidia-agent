@@ -39,7 +39,7 @@ The Portal proxies a curated catalog of agentic models from across the ecosystem
 | **Tencent** | Hunyuan 3 Preview |
 | **Xiaomi** | MiMo V2.5 Pro |
 | **StepFun** | Step 3.5 Flash |
-| **Elidia** | Hermes-4-70B, Hermes-4-405B (chat, see [note below](#a-note-on-hermes-4)) |
+| **Elidia** | Hermes-4-70B, Hermes-4-405B (chat — see [choosing a model](#choosing-a-model-for-agent-work)) |
 | **+ everything else** | 280+ additional models — the full agentic frontier |
 
 Routing happens through OpenRouter under the hood, so model availability and failover behavior matches what you'd get with an OpenRouter key — just billed against your Elidia subscription instead. Switch between Claude Sonnet 4.6 for code and Gemini 3 Pro for long context with `/model` mid-session — no new credentials, no top-ups, no surprise zero-balance errors.
@@ -72,11 +72,17 @@ Because everything routes through one OAuth-authenticated Portal session, you do
 
 [Native Windows](/user-guide/windows-native) makes per-tool API key setup its rough edge — installing a Firecrawl account, a FAL account, a Browser Use account, an OpenAI key from Windows is the highest-friction part of getting a useful agent. A Portal subscription smooths that out: one OAuth covers the model and every gateway tool, so Windows users get the same experience as macOS/Linux without manually configuring four backends.
 
-## A note on Hermes 4
+## Choosing a model for agent work
 
-AiUtils's own **Hermes 4** family (Hermes-4-70B, Hermes-4-405B) is available through the Portal at heavily discounted rates. These are **frontier hybrid-reasoning chat models** — strong at math, science, instruction following, schema adherence, roleplay, and long-form writing.
+Not every model in the catalog suits the agent. Chat- and reasoning-tuned models
+— `hermes-4-70b` and `hermes-4-405b` among them — are strong at math, science,
+instruction following and long-form writing, and they are cheap through the
+Portal, but they are not tuned for the rapid-fire tool-calling loop the agent
+runs on. They will struggle with multi-step agent work.
 
-They are **not recommended for use inside Elidia Agent**, however. Hermes 4 is tuned for chat and reasoning, not the rapid-fire tool-calling loop the agent relies on. Use them for [Elidia Chat](https://chat.aiutils.io), for research workflows, or via the [subscription proxy](/user-guide/features/subscription-proxy) from other tooling — but for agent work, pick a frontier agentic model from the catalog instead:
+Use those for [Elidia Chat](https://chat.aiutils.io), for research workflows, or
+through the [subscription proxy](/user-guide/features/subscription-proxy) from
+other tooling. For the agent itself, pick a frontier agentic model:
 
 ```bash
 /model anthropic/claude-sonnet-4.6     # best general-purpose agentic model

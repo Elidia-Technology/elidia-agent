@@ -11,12 +11,36 @@ post-processes the result for interactive pickers (Telegram, Discord):
   may supply their own model set through config.
 
 These tests exercise the filter in isolation by mocking
-``list_authenticated_providers`` and ``fetch_openrouter_models`` so no
-network or auth state is required.
+``list_authenticated_providers`` and ``fetch_openrouter_models``. The
+``_no_live_model_discovery`` fixture below closes the remaining hole: the
+custom-endpoint path still probed the configured base_url for real, so a
+developer with Ollama running got that machine's models in the assertions.
 """
 
 import pytest
 from elidia_cli import model_switch
+
+
+@pytest.fixture(autouse=True)
+def _no_live_model_discovery(monkeypatch):
+    """Stop these tests probing whatever happens to be listening on localhost.
+
+    list_authenticated_providers() calls fetch_api_models(api_key, api_url) for
+    any custom provider that has a key or no configured models. The fixtures
+    here point at http://localhost:11434/v1, so on a machine with Ollama running
+    the live catalog REPLACED the configured models and the assertions compared
+    against that machine's installed models — {qwen3:1.7b, deepseek-v3.1:671b-cloud}
+    instead of {glm-5.1, qwen3-coder}. It also made the module take ~90s, waiting
+    on connections to endpoints that do not exist.
+
+    Returning an empty list is the "endpoint told us nothing" branch, which is
+    what these tests were silently relying on — now deterministically, instead of
+    depending on what the developer has installed.
+    """
+    monkeypatch.setattr(
+        "elidia_cli.models.fetch_api_models",
+        lambda api_key, api_url, *a, **kw: [],
+    )
 
 
 def _make_provider(slug, name=None, models=None, *, is_current=False,

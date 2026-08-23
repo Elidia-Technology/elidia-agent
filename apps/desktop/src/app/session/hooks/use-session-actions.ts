@@ -36,8 +36,8 @@ import {
   setMessages,
   setSelectedStoredSessionId,
   setSessions,
-  setSessionsTotal,
   setSessionStartedAt,
+  setSessionsTotal,
   setTurnStartedAt,
   setYoloActive
 } from '@/store/session'

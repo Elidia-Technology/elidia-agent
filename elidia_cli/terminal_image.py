@@ -1,11 +1,11 @@
 """Terminal inline-image rendering for the Elidia brand mark.
 
-The old welcome banner drew a *caduceus* (the winged staff) on its left
+The old welcome banner drew a Hermes *caduceus* (the winged staff) on its left
 side. That is the wrong brand. This module replaces it with the real Elidia
 icon: when the terminal speaks an inline-image protocol (Kitty graphics,
 iTerm2/WezTerm OSC-1337) the actual ``elidia-icon-dark.png`` is emitted; every
 other terminal (and every non-TTY pipe) gets a Unicode block-art rendering of
-the same icon so no old symbol is ever drawn.
+the same icon so no Hermes symbol is ever drawn.
 
 Everything here is deliberately dependency-free (no PIL at runtime): the PNG
 dimensions are read straight from the file header, and the fallback art is a
@@ -28,14 +28,14 @@ logger = logging.getLogger(__name__)
 # Brand mark
 # ---------------------------------------------------------------------------
 
-# The Elidia brand glyph. Replaces the caduceus (staff) symbol that
+# The Elidia brand glyph. Replaces the Hermes caduceus (staff) symbol that
 # used to prefix labels like "Elidia" across the CLI.
 ELIDIA_MARK = "✦"
 
 # Unicode Braille fallback of assets/elidia-icon-dark.png (the Elidia emblem).
 # The icon is a dark mark (for light backgrounds), so it is inverted here — the
 # dark mark becomes light Braille dots — for dark terminals. Regenerated from the
-# icon so terminals without an image protocol still show the Elidia mark.
+# icon so terminals without an image protocol still show the Elidia mark, not Hermes.
 ELIDIA_ICON_ART = "\n".join([
     '⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣠⣤⣶⠶⠾⠿⠛⠛⠛⠛⠛⠻⠶⠶⢦⣤⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',
     '⠀⠀⠀⠀⠀⣠⣴⠾⠟⠋⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠙⠳⠶⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀',

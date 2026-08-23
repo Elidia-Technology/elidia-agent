@@ -221,8 +221,10 @@ async function fetchProviderDefaultModel(
   // free user gets a free model rather than a paid default like opus). Fall
   // back to the first curated model if the endpoint can't resolve one.
   let defaultModel = String(models[0])
+
   try {
     const recommended = await getRecommendedDefaultModel(String(matched.slug))
+
     if (recommended.model && models.map(String).includes(recommended.model)) {
       defaultModel = recommended.model
     } else if (recommended.model) {
@@ -291,6 +293,7 @@ async function completeWithModelConfirm(
       provider: defaults.providerSlug,
       model: defaults.defaultModel
     })
+
     notifyGatewayTools(res.gateway_tools)
   } catch {
     // Persistence failed — still show the confirm card so the user can
@@ -387,6 +390,7 @@ export async function refreshOnboarding(ctx: OnboardingContext) {
   // list is loaded and show the picker.
   if ($desktopOnboarding.get().manual) {
     await refreshProviders()
+
     return false
   }
 

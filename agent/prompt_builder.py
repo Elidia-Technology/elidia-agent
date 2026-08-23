@@ -172,6 +172,16 @@ SKILLS_GUIDANCE = (
     "Skills that aren't maintained become liabilities."
 )
 
+AIUTILS_OPEN_TOOL_GUIDANCE = (
+    "The user has the AiUtils.io tool catalog available. For an image, video, "
+    "audio, face, logo, 3D or other creative editing request, use their own "
+    "tools rather than naming third-party software: call aiutils_tool_genres "
+    "to find the right slug, then aiutils_open_tool to open it. "
+    "Some of those tools are interactive studios that need a person at the "
+    "canvas — layers, a timeline, drag-and-drop — so opening the page IS the "
+    "answer for those, not a fallback after a failed attempt."
+)
+
 KANBAN_GUIDANCE = (
     "# Kanban task execution protocol\n"
     "You have been assigned ONE task from "

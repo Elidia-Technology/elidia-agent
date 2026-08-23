@@ -80,12 +80,45 @@ function cachedScriptPath(elidiaHome, commit) {
   return path.join(bootstrapCacheDir(elidiaHome), `install-${commit}.${process.platform === 'win32' ? 'ps1' : 'sh'}`)
 }
 
-function downloadInstallScript(commit, destPath) {
-  // Fetch from GitHub raw at the pinned commit. The raw URL with a SHA
-  // is immutable (unlike a branch ref), so we don't need integrity
-  // verification beyond "did the file we wrote pass a syntax probe."
+// The PUBLIC build/release mirror. Source of truth is GitLab, which is not
+// reachable from a user's machine, so first-launch bootstrap has to come from
+// here. `elidia-agent-cli-v2` was the old name and now only 301-redirects;
+// raw.githubusercontent does not follow that reliably.
+const PUBLIC_REPO = 'Elidia-Technology/elidia-agent'
+const PUBLIC_FALLBACK_REF = 'master'
+
+function installScriptUrl(ref) {
+  return `https://raw.githubusercontent.com/${PUBLIC_REPO}/${ref}/scripts/${installScriptName()}`
+}
+
+async function downloadInstallScript(commit, destPath) {
+  // Prefer the pinned commit: a SHA URL is immutable, so the script a build
+  // installs is the one that shipped with it.
+  //
+  // But the SHA only resolves when that commit exists in the PUBLIC repo, and
+  // for any build made from the GitLab source it does not — GitHub answers 422
+  // for the commit and 404 for the file. That made every locally built desktop
+  // DEAD ON FIRST LAUNCH for a user without elidia_cli already installed:
+  //
+  //   [bootstrap] fetching install.sh for 0897f5d2ed14 from GitHub
+  //   {"type":"failed","error":"Failed to download install.sh: HTTP 404 ..."}
+  //   [boot] Desktop boot failed: Elidia bootstrap failed
+  //
+  // Nobody hit it because nothing had ever been released. So: try the pinned
+  // commit, and fall back to the public default branch rather than stranding
+  // the user. Reproducibility is worth a lot; it is not worth an app that
+  // cannot start.
+  try {
+    return await downloadFrom(installScriptUrl(commit), destPath)
+  } catch (err) {
+    const detail = String(err && err.message ? err.message : err)
+    if (!/HTTP 404|HTTP 422/.test(detail)) throw err
+    return await downloadFrom(installScriptUrl(PUBLIC_FALLBACK_REF), destPath)
+  }
+}
+
+function downloadFrom(url, destPath) {
   const scriptName = installScriptName()
-  const url = `https://raw.githubusercontent.com/Elidia-Technology/elidia-agent/${commit}/scripts/${scriptName}`
   return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(destPath), { recursive: true })
     const tmpPath = destPath + '.tmp'
@@ -587,5 +620,8 @@ module.exports = {
   // Exposed for testability
   parseStageResult,
   resolveLocalInstallScript,
-  cachedScriptPath
+  cachedScriptPath,
+  installScriptUrl,
+  PUBLIC_REPO,
+  PUBLIC_FALLBACK_REF
 }

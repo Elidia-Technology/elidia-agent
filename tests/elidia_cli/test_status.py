@@ -77,7 +77,11 @@ def test_show_status_reports_elidia_auth_error(monkeypatch, capsys, tmp_path):
     status_mod.show_status(SimpleNamespace(all=False, deep=False))
 
     output = capsys.readouterr().out
-    assert "Elidia Portal   ✗ not logged in (run: elidia portal)" in output
+    assert "Elidia Portal" in output
+    # Not the exact column padding: "Elidia Portal" is 13 chars in a
+    # `:<12}` field, so the gap is whatever the overflow leaves. Pinning it
+    # made the test assert the label's alignment, not its meaning.
+    assert "✗ not logged in (run: elidia portal)" in output
     assert "Error:      Refresh session has been revoked" in output
     assert "Access exp:" in output
     assert "Key exp:" in output
@@ -128,7 +132,8 @@ def test_show_status_reports_elidia_inference_key_without_portal_login(monkeypat
     status_mod.show_status(SimpleNamespace(all=False, deep=False))
 
     output = capsys.readouterr().out
-    assert "Elidia Portal   ✗ not logged in (Elidia inference key configured)" in output
+    assert "Elidia Portal" in output
+    assert "✗ not logged in (Elidia inference key configured)" in output
     assert "Inference:  https://inference.example.com/v1" in output
     assert "Elidia inference credentials are configured" in output
 

@@ -98,8 +98,13 @@ def test_main_import_applies_user_env_over_shell_values(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", "https://old.example/v1")
     monkeypatch.setenv("ELIDIA_INFERENCE_PROVIDER", "openrouter")
 
-    sys.modules.pop("elidia_cli.main", None)
-    importlib.import_module("elidia_cli.main")
+    # Re-import under the fresh ELIDIA_HOME, then restore it COMPLETELY —
+    # sys.modules AND the elidia_cli.main package attribute. Restoring only
+    # sys.modules leaves the attribute pointing at the new module, which is
+    # where monkeypatch.setattr("elidia_cli.main.x", ...) lands. See
+    # tests/elidia_cli/conftest.py::reimported.
+    from tests.elidia_cli.conftest import reimported
 
-    assert os.getenv("OPENAI_BASE_URL") == "https://new.example/v1"
-    assert os.getenv("ELIDIA_INFERENCE_PROVIDER") == "custom"
+    with reimported("elidia_cli.main"):
+        assert os.getenv("OPENAI_BASE_URL") == "https://new.example/v1"
+        assert os.getenv("ELIDIA_INFERENCE_PROVIDER") == "custom"

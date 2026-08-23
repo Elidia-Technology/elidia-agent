@@ -2,6 +2,8 @@
   "name": "@elidia/ink",
   "version": "0.0.1",
   "private": true,
+  "license": "MIT",
+  "description": "Vendored fork of Ink (MIT, (c) Vadym Demedes, Sindre Sorhus). See NOTICE and LICENSE.ink.",
   "type": "module",
   "scripts": {
     "build": "esbuild src/entry-exports.ts --bundle --platform=node --format=esm --packages=external --outdir=dist"

@@ -1274,7 +1274,12 @@ function resolveUpdaterBinary() {
 //
 // Detection (checkUpdates / commit changelog / "N behind") stays in the UI;
 // only this apply action changed.
-async function applyUpdates(opts = {}) {
+// `_opts` is the IPC payload from `elidia:updates:apply`. Nothing reads it
+// today — neither this path nor the Windows one — and both renderer callers
+// invoke applyUpdates() with no argument. Kept in the signature because it is a
+// wire boundary a renderer may start using, underscore-prefixed so it reads as
+// "accepted and currently ignored" rather than as an option that is honoured.
+async function applyUpdates(_opts = {}) {
   if (updateInFlight) {
     throw new Error('An update is already in progress.')
   }
@@ -1289,7 +1294,7 @@ async function applyUpdates(opts = {}) {
       // whole update itself: `elidia update` (backend) + `elidia desktop
       // --build-only` (OS-aware GUI rebuild), then swap the running .app bundle
       // with the freshly built one and relaunch.
-      return await applyUpdatesPosixInApp(opts)
+      return await applyUpdatesPosixInApp()
     }
     if (!updater) {
       // No staged updater binary — this is a CLI-installed user (they ran
@@ -1413,7 +1418,11 @@ function shellQuote(value) {
 // (`elidia desktop --build-only`), then atomically swap the running .app bundle
 // with the freshly built one and relaunch. Degrades to "backend updated,
 // restart to load the new GUI" if the swap can't be performed.
-async function applyUpdatesPosixInApp(opts = {}) {
+// Takes no options on purpose: nothing in the tree reads opts.<anything>, on
+// this path or the Windows one, and both renderer callers invoke applyUpdates()
+// with no argument. Threading a parameter through that is never read invites
+// the reader to believe options are honoured here.
+async function applyUpdatesPosixInApp() {
   const updateRoot = resolveUpdateRoot()
   const elidia = resolveElidiaCliBinary(updateRoot)
   if (!elidia) {

@@ -3252,7 +3252,12 @@ class ElidiaCLI:
             os.getenv("ELIDIA_EPHEMERAL_SYSTEM_PROMPT", "")
             or CLI_CONFIG["agent"].get("system_prompt", "")
         )
-        self.personalities = CLI_CONFIG["agent"].get("personalities", {})
+        # Built-in presets overlaid with the user's own. Theirs win on a name
+        # collision, so shipping a new built-in never replaces a persona they
+        # wrote themselves.
+        from elidia_cli.personas import merge_personalities
+
+        self.personalities = merge_personalities(CLI_CONFIG["agent"].get("personalities", {}))
         
         # Ephemeral prefill messages (few-shot priming, never persisted)
         self.prefill_messages = _load_prefill_messages(
@@ -5298,7 +5303,7 @@ class ElidiaCLI:
         if is_elidia_non_agentic(model_name):
             self._console_print()
             self._console_print(
-                "[bold yellow]⚠  Hermes 3 & 4 models are NOT agentic and are not "
+                "[bold yellow]⚠  Nous Research Hermes 3 & 4 models are NOT agentic and are not "
                 "designed for use with Elidia Agent.[/]"
             )
             self._console_print(

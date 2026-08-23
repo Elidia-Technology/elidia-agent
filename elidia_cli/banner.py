@@ -72,7 +72,7 @@ def _banner_hero(accent: str) -> str:
 
     Returns the Elidia icon as an inline terminal image (Kitty/iTerm2/WezTerm)
     when the terminal supports one; otherwise the Unicode block-art fallback.
-    Either way it replaces the old caduceus.
+    Either way it replaces the old Hermes caduceus.
     """
     from elidia_cli.terminal_image import render_icon, ELIDIA_ICON_ART
     try:
@@ -532,7 +532,7 @@ def build_welcome_banner(console: "Console", model: str, cwd: str,
 
     # Left-column hero: the Elidia icon (inline terminal image when the terminal
     # supports one, else a Unicode block-art fallback). This replaces the old
-    # caduceus. A skin's custom banner_hero still takes precedence.
+    # Hermes caduceus. A skin's custom banner_hero still takes precedence.
     try:
         from elidia_cli.skin_engine import get_active_skin
         _bskin = get_active_skin()

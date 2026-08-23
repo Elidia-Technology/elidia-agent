@@ -38,6 +38,20 @@ class TestUserSystemdPrivateSocketPreflight:
 
 
 class TestSystemdServiceRefresh:
+
+    @pytest.fixture(autouse=True)
+    def _skip_user_systemd_preflight(self, monkeypatch):
+        """Neutralise the D-Bus reachability precondition.
+
+        systemd_start/stop/restart call _preflight_user_systemd() first, which
+        raises UserSystemdUnavailableError on any host without a user D-Bus
+        session — every macOS machine. These tests are about unit-file refresh
+        and restart routing, not about whether this host can talk to systemd,
+        so the precondition is stubbed rather than left to decide whether the
+        test runs at all. TestUserSystemdPrivateSocketPreflight below covers
+        the preflight itself.
+        """
+        monkeypatch.setattr(gateway_cli, "_preflight_user_systemd", lambda **kw: None)
     def test_systemd_install_repairs_outdated_unit_without_force(self, tmp_path, monkeypatch):
         unit_path = tmp_path / "elidia-gateway.service"
         unit_path.write_text("old unit\n", encoding="utf-8")
@@ -737,6 +751,20 @@ class TestGatewayServiceDetection:
         assert gateway_cli._is_service_running() is False
 
 class TestGatewaySystemServiceRouting:
+
+    @pytest.fixture(autouse=True)
+    def _skip_user_systemd_preflight(self, monkeypatch):
+        """Neutralise the D-Bus reachability precondition.
+
+        systemd_start/stop/restart call _preflight_user_systemd() first, which
+        raises UserSystemdUnavailableError on any host without a user D-Bus
+        session — every macOS machine. These tests are about unit-file refresh
+        and restart routing, not about whether this host can talk to systemd,
+        so the precondition is stubbed rather than left to decide whether the
+        test runs at all. TestUserSystemdPrivateSocketPreflight below covers
+        the preflight itself.
+        """
+        monkeypatch.setattr(gateway_cli, "_preflight_user_systemd", lambda **kw: None)
     def test_systemd_restart_gracefully_restarts_running_service_and_waits(self, monkeypatch, capsys):
         calls = []
 

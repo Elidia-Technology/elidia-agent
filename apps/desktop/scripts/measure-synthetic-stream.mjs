@@ -205,8 +205,10 @@ async function main() {
   // Reset DOM back to baseline so we don't accumulate fake messages.
   await cdp.eval('window.__PERF_DRIVE__.reset()')
 
-  // Analysis (trim warm-up: drop frames before first mutation timestamp).
-  const firstMut = data.mutations[0]?.t
+  // Analysis. An earlier approach trimmed warm-up by dropping frames before the
+  // first mutation timestamp; the code below deliberately uses the simpler
+  // fixed-window heuristic instead (see WARMUP_MS). The `firstMut` binding for
+  // the abandoned approach was left behind, unused — removed.
   const frames = data.frames
 
   // Sum durations to figure out when each frame happened (relative to recorder start).

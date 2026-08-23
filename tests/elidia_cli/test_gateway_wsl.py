@@ -122,6 +122,35 @@ class TestWslSystemdOperational:
 class TestSupportsSystemdServicesWSL:
     """Test that supports_systemd_services() handles WSL correctly."""
 
+    @pytest.fixture(autouse=True)
+    def _systemctl_present(self, monkeypatch):
+        """Pretend systemctl is on PATH.
+
+        supports_systemd_services() returns False early when
+        ``shutil.which("systemctl")`` is None, before it ever reaches the WSL
+        and native-Linux branches these tests are about. No test here stubbed
+        it, so on any host without systemd — every macOS dev machine — the two
+        cases expecting True failed, and the two expecting False passed for
+        entirely the wrong reason: they exited at the PATH check without
+        touching the branch under test.
+        """
+        import shutil
+
+        real_which = shutil.which
+        monkeypatch.setattr(
+            gateway.shutil, "which",
+            lambda cmd, *a, **kw: "/usr/bin/systemctl" if cmd == "systemctl"
+            else real_which(cmd, *a, **kw),
+        )
+
+    def test_missing_systemctl_is_false(self, monkeypatch):
+        """The early return the fixture above stubs out — asserted directly, so
+        it stays covered rather than being covered by accident."""
+        monkeypatch.setattr(gateway, "is_linux", lambda: True)
+        monkeypatch.setattr(gateway, "is_termux", lambda: False)
+        monkeypatch.setattr(gateway.shutil, "which", lambda cmd, *a, **kw: None)
+        assert gateway.supports_systemd_services() is False
+
     def test_wsl_with_systemd(self, monkeypatch):
         """WSL + working systemd → True."""
         monkeypatch.setattr(gateway, "is_linux", lambda: True)

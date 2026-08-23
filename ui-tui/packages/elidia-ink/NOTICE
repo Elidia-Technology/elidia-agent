@@ -1,0 +1,22 @@
+@elidia/ink
+===========
+
+This package is a vendored fork of Ink (React for CLIs), licensed under the
+MIT License. The upstream copyright notice is retained in LICENSE.ink in this
+directory, as the MIT License requires.
+
+    Upstream:  https://github.com/vadimdemedes/ink
+    License:   MIT (see LICENSE.ink)
+    Copyright: (c) Vadym Demedes <vadimdemedes@hey.com>
+               (c) Sindre Sorhus <sindresorhus@gmail.com>
+
+Ink's architecture and public API are the work of its original authors. This
+directory retains Ink's internal design — the React reconciler (reconciler.ts),
+the terminal DOM (dom.ts), output buffering (output.ts), the Yoga-backed style
+layer (styles.ts), and the ink-box / ink-text / ink-root / ink-virtual-text
+host element names.
+
+Modifications made for Elidia Agent are copyright Elidia Technology Pvt Ltd
+and are released under the same MIT License. The fork was renamed from
+@hermes/ink to @elidia/ink; that rename is a package-identity change only and
+does not assert authorship over the upstream work.

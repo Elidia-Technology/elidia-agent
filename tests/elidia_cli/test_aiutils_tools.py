@@ -172,3 +172,107 @@ class TestAiUtilsEmbed:
         assert result["dimensions"] == 3
         assert result["vectors"] == 1
         assert result["model"] == "e3"
+
+
+class TestSpendGuardCoversEveryBilledPath:
+    """AIUT-2948 regression tests.
+
+    ``aiutils_tool_execute`` and ``aiutils_embed`` both spend DT — portal tool
+    execution is billed server-side ("Portal handles credit deduction" in the
+    gateway proxy) and embeddings bill on token usage — but neither consulted
+    the credit guard. These tests assert the billed call is not merely reported
+    as refused, but *never made*.
+    """
+
+    @staticmethod
+    def _broke_wallet():
+        class _Wallet:
+            def estimate_cost(self, model, parameters=None):
+                return types.SimpleNamespace(estimated_dt=50)
+
+            def balance(self):
+                return types.SimpleNamespace(balance_dt=0)
+
+        return _Wallet()
+
+    def test_tool_execute_refuses_on_empty_wallet_and_makes_no_call(self, client):
+        client.wallet = self._broke_wallet()
+
+        result = _parse(aiutils_tool._handle_execute({"tool_slug": "image-generator"}))
+
+        assert "error" in result
+        # An exhausted wallet now PAUSES the run and writes resume state rather
+        # than reporting "insufficient" (owner directive 2026-08-23). Still
+        # refuses, still makes no billed call — the mechanism changed, not the
+        # guarantee.
+        assert "Paused" in result["error"]
+        assert client.tools.last_execute is None, "billed tool call must not be made"
+
+    def test_embed_refuses_on_empty_wallet(self, client):
+        client.wallet = self._broke_wallet()
+        calls = []
+        client.embeddings.create = lambda model, input: calls.append(model)
+
+        result = _parse(aiutils_embed._handle_embed({"input": "hello"}))
+
+        assert "error" in result
+        assert "Paused" in result["error"]  # see note above — pause, not "insufficient"
+        assert calls == [], "billed embedding call must not be made"
+
+    def test_unreadable_wallet_refuses_rather_than_assuming_funds(self, client):
+        class _Wallet:
+            def estimate_cost(self, model, parameters=None):
+                raise RuntimeError("boom")
+
+            def balance(self):
+                raise RuntimeError("network down")
+
+        client.wallet = _Wallet()
+
+        result = _parse(aiutils_tool._handle_execute({"tool_slug": "image-generator"}))
+
+        assert "error" in result
+        assert "Could not verify wallet balance" in result["error"]
+        assert client.tools.last_execute is None
+
+    def test_unpriceable_slug_degrades_to_balance_check_not_a_refusal(self, client):
+        """A tool slug 404s on /v1/pricing/estimate — that must not block a
+        funded wallet, or every tool call would break."""
+
+        class _Wallet:
+            def estimate_cost(self, model, parameters=None):
+                raise RuntimeError("404 Model not found")
+
+            def balance(self):
+                return types.SimpleNamespace(balance_dt=250)
+
+        client.wallet = _Wallet()
+
+        result = _parse(aiutils_tool._handle_execute({"tool_slug": "image-generator"}))
+
+        assert "error" not in result
+        assert client.tools.last_execute is not None, "funded wallet must still run the tool"
+
+    def test_guard_reports_inexact_when_cost_could_not_be_priced(self, client):
+        class _Wallet:
+            def estimate_cost(self, model, parameters=None):
+                raise RuntimeError("404 Model not found")
+
+            def balance(self):
+                return types.SimpleNamespace(balance_dt=250)
+
+        client.wallet = _Wallet()
+
+        guard = aiutils_client.check_spend_allowed("some-slug", client=client)
+
+        assert guard["ok"] is True
+        assert guard["exact"] is False
+        assert guard["estimated_dt"] is None
+        assert guard["balance_dt"] == 250
+
+    def test_guard_is_exact_when_model_is_priceable(self, client):
+        guard = aiutils_client.check_spend_allowed("real-model", client=client)
+
+        assert guard["ok"] is True
+        assert guard["exact"] is True
+        assert guard["estimated_dt"] == 7

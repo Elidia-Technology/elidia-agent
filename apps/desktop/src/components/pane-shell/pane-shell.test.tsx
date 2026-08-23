@@ -147,7 +147,32 @@ describe('PaneShell composition', () => {
     expect($paneStates.get().files?.open).toBe(true)
   })
 
-  it('uses widthOverride from the store when set', () => {
+  it('uses widthOverride from the store when the pane is resizable', () => {
+    setPaneOpen('files', true)
+    setPaneWidthOverride('files', 320)
+
+    const rendered = render(
+      <PaneShell>
+        <Pane id="files" resizable={true} side="left" width="240px">
+          files
+        </Pane>
+        <PaneMain>main</PaneMain>
+      </PaneShell>
+    )
+
+    expect(getColumnTemplate(gridContainer(rendered))).toEqual(['320px', 'minmax(0,1fr)'])
+  })
+
+  it('ignores a stored widthOverride when the pane is NOT resizable', () => {
+    // trackForPane gates the override on `pane.resizable`, and `resizable`
+    // defaults to false. A pane the user cannot drag keeps its declared width,
+    // so a stale override left in persisted state — from an older build where
+    // the pane was resizable — cannot distort a layout they can no longer fix.
+    //
+    // The test above omitted `resizable` and asserted 320px, so it contradicted
+    // the code. Neither was ever caught: the desktop's vitest had no DOM
+    // configured, so this whole file died on `document is not defined` and had
+    // never run since it was written.
     setPaneOpen('files', true)
     setPaneWidthOverride('files', 320)
 
@@ -160,7 +185,7 @@ describe('PaneShell composition', () => {
       </PaneShell>
     )
 
-    expect(getColumnTemplate(gridContainer(rendered))).toEqual(['320px', 'minmax(0,1fr)'])
+    expect(getColumnTemplate(gridContainer(rendered))).toEqual(['240px', 'minmax(0,1fr)'])
   })
 
   it('preserves CSS-string widths verbatim (clamp, var, etc.)', () => {

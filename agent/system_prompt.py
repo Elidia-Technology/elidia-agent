@@ -31,6 +31,7 @@ from agent.prompt_builder import (
     GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
     ELIDIA_AGENT_HELP_GUIDANCE,
     KANBAN_GUIDANCE,
+    AIUTILS_OPEN_TOOL_GUIDANCE,
     MEMORY_GUIDANCE,
     OPENAI_MODEL_EXECUTION_GUIDANCE,
     PLATFORM_HINTS,
@@ -118,6 +119,11 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         tool_guidance.append(SESSION_SEARCH_GUIDANCE)
     if "skill_manage" in agent.valid_tool_names:
         tool_guidance.append(SKILLS_GUIDANCE)
+    # Only when the opt-in `aiutils` toolset is loaded — a stock Elidia install
+    # has no portal catalog, and guidance for tools that aren't there is just
+    # prompt weight that invites the model to hallucinate calls it cannot make.
+    if "aiutils_open_tool" in agent.valid_tool_names:
+        tool_guidance.append(AIUTILS_OPEN_TOOL_GUIDANCE)
     # Kanban worker/orchestrator lifecycle — only present when the
     # dispatcher spawned this process (kanban_show check_fn gates on
     # ELIDIA_KANBAN_TASK env var). Normal chat sessions never see

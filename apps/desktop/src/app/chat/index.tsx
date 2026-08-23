@@ -15,7 +15,7 @@ import { Backdrop } from '@/components/Backdrop'
 import { NotificationStack } from '@/components/notifications'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
-import { getGlobalModelOptions, type ElidiaGateway } from '@/elidia'
+import { type ElidiaGateway, getGlobalModelOptions } from '@/elidia'
 import type { ChatMessage } from '@/lib/chat-messages'
 import { quickModelOptions, sessionTitle, toRuntimeMessage } from '@/lib/chat-runtime'
 import { useIncrementalExternalStoreRuntime } from '@/lib/incremental-external-store-runtime'
@@ -97,9 +97,12 @@ function ChatHeader({
 }: ChatHeaderProps) {
   const sessions = useStore($sessions)
   const pinnedSessionIds = useStore($pinnedSessionIds)
+
   const activeStoredSession =
     sessions.find(session => session.id === selectedSessionId || session._lineage_root_id === selectedSessionId) || null
+
   const title = activeStoredSession ? sessionTitle(activeStoredSession) : 'New session'
+
   // Pins live on the durable lineage-root id, but selectedSessionId is the live
   // (tip) id — resolve through the loaded row so the menu reflects the pin
   // state after auto-compression rotates the id.

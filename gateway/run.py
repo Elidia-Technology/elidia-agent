@@ -8122,6 +8122,9 @@ class GatewayRunner:
         if canonical == "kanban":
             return await self._handle_kanban_command(event)
 
+        if canonical == "link":
+            return await self._handle_link_command(event)
+
         if canonical == "retry":
             return await self._handle_retry_command(event)
         
@@ -12827,6 +12830,51 @@ class GatewayRunner:
             return t("gateway.fast.saved", label=label)
         return t("gateway.fast.session_only", label=label)
 
+    async def _handle_link_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
+        """Handle /link — attach this user's own AiUtils key to their identity.
+
+        Without it, every platform user's DT spend bills the OPERATOR's wallet,
+        because the gateway resolves a single ELIDIA_KEY from its environment.
+
+        Refuses outright in group chats. A key pasted into a group is visible to
+        everyone in it and stays in the platform's history; there is no way to
+        accept it safely there, so the command does not try.
+        """
+        from gateway import key_link
+
+        source = event.source
+        platform = getattr(source, "platform", None)
+        platform_str = (
+            platform.value if hasattr(platform, "value") else str(platform or "")
+        ).lower()
+        user_id = str(getattr(source, "user_id", "") or "")
+        chat_type = str(getattr(source, "chat_type", "") or "").lower()
+        args = event.get_command_args().strip()
+
+        if not args:
+            return EphemeralReply(
+                f"{key_link.status(platform_str, user_id)}\n\n"
+                f"{key_link.trust_notice()}"
+            )
+
+        if args.lower() in {"off", "remove", "unlink"}:
+            _ok, message = key_link.unlink(platform_str, user_id)
+            return EphemeralReply(message)
+
+        # A key in a group is already public by the time we see it. Do not
+        # store it, do not confirm it — say what happened and what to do.
+        if chat_type not in {"dm", "private"}:
+            return EphemeralReply(
+                "I will not link a key from a group chat — everyone here can "
+                "read it, and it stays in this chat's history.\n\n"
+                "Delete your message, treat that key as compromised and revoke "
+                "it in the Developer Console, then send /link to me in a direct "
+                "message instead."
+            )
+
+        _ok, message = key_link.link(platform_str, user_id, args)
+        return EphemeralReply(message)
+
     async def _handle_yolo_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
         """Handle /yolo — toggle dangerous command approval bypass for this session only."""
         from tools.approval import (
@@ -15463,12 +15511,33 @@ class GatewayRunner:
         in a ``finally`` block.
         """
         from gateway.session_context import set_session_vars
+
+        platform_value = context.source.platform.value
+        user_id = str(context.source.user_id) if context.source.user_id else ""
+
+        # Bill this person's own DT wallet when they have linked a key (B14).
+        # Without it the gateway resolves a single ELIDIA_KEY from its own
+        # environment, so every user's spend lands on the OPERATOR's balance.
+        # Installed here because this is the one place per inbound message that
+        # already establishes who is being served; a ContextVar because messages
+        # are handled concurrently and a module global would let one user's key
+        # serve another's turn.
+        try:
+            from elidia_cli.key_store import set_session_key_resolver
+            from gateway.key_link import linked_key
+
+            set_session_key_resolver(lambda: linked_key(platform_value, user_id))
+        except Exception as exc:
+            # A missing or broken link store must fall back to the operator key,
+            # not drop the message.
+            logger.debug("Could not install the per-user key resolver: %s", exc)
+
         return set_session_vars(
-            platform=context.source.platform.value,
+            platform=platform_value,
             chat_id=context.source.chat_id,
             chat_name=context.source.chat_name or "",
             thread_id=str(context.source.thread_id) if context.source.thread_id else "",
-            user_id=str(context.source.user_id) if context.source.user_id else "",
+            user_id=user_id,
             user_name=str(context.source.user_name) if context.source.user_name else "",
             session_key=context.session_key,
             message_id=str(context.source.message_id) if context.source.message_id else "",
@@ -15477,6 +15546,16 @@ class GatewayRunner:
     def _clear_session_env(self, tokens: list) -> None:
         """Restore session context variables to their pre-handler values."""
         from gateway.session_context import clear_session_vars
+
+        # Clear rather than reset-by-token, matching clear_session_vars: a key
+        # left installed would follow this context into unrelated work.
+        try:
+            from elidia_cli.key_store import set_session_key_resolver
+
+            set_session_key_resolver(None)
+        except Exception:
+            pass
+
         clear_session_vars(tokens)
 
     async def _run_in_executor_with_context(self, func, *args):

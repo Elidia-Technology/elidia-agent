@@ -1,6 +1,6 @@
 import { Profiler, type ProfilerOnRenderCallback, type ReactNode } from 'react'
 
-import { $messages, setMessages, setBusy } from '@/store/session'
+import { $messages, setBusy, setMessages } from '@/store/session'
 
 type Sample = {
   id: string
@@ -40,13 +40,16 @@ if (typeof window !== 'undefined' && !window.__PERF_PROBE__) {
     },
     summary: () => {
       const byId = new Map<string, number[]>()
+
       for (const s of samples) {
         const k = `${s.id}:${s.phase}`
         const arr = byId.get(k) ?? []
         arr.push(s.actualDuration)
         byId.set(k, arr)
       }
+
       const out: Record<string, { count: number; total: number; max: number; p50: number; p95: number }> = {}
+
       for (const [k, arr] of byId) {
         arr.sort((a, b) => a - b)
         const total = arr.reduce((a, b) => a + b, 0)
@@ -58,6 +61,7 @@ if (typeof window !== 'undefined' && !window.__PERF_PROBE__) {
           p95: Math.round(arr[Math.floor(arr.length * 0.95)] * 100) / 100,
         }
       }
+
       return out
     },
   }
@@ -65,9 +69,11 @@ if (typeof window !== 'undefined' && !window.__PERF_PROBE__) {
 
 const onRender: ProfilerOnRenderCallback = (id, phase, actualDuration, baseDuration, startTime, commitTime) => {
   const probe = typeof window !== 'undefined' ? window.__PERF_PROBE__ : undefined
-  if (!probe || !probe.enabled) return
+
+  if (!probe || !probe.enabled) {return}
   probe.samples.push({ id, phase, actualDuration, baseDuration, startTime, commitTime })
-  if (probe.samples.length > 5000) probe.samples.splice(0, probe.samples.length - 5000)
+
+  if (probe.samples.length > 5000) {probe.samples.splice(0, probe.samples.length - 5000)}
 }
 
 if (typeof window !== 'undefined' && !window.__PERF_DRIVE__) {
@@ -86,7 +92,8 @@ if (typeof window !== 'undefined' && !window.__PERF_DRIVE__) {
     snapshotMsgs: () => $messages.get().length,
     reset: () => {
       activeHandle?.stop()
-      if (baseline) setMessages(baseline)
+
+      if (baseline) {setMessages(baseline)}
       baseline = null
       setBusy(false)
     },
@@ -104,7 +111,8 @@ if (typeof window !== 'undefined' && !window.__PERF_DRIVE__) {
     }: { chunk?: string; intervalMs?: number; totalTokens?: number; flushMinMs?: number } = {}) => {
       activeHandle?.stop()
       const current = $messages.get()
-      if (!baseline) baseline = current
+
+      if (!baseline) {baseline = current}
       const msgId = `synthetic-${Date.now()}`
       // Seed an empty assistant message — assistant-ui will see it grow.
       setMessages([
@@ -126,13 +134,14 @@ if (typeof window !== 'undefined' && !window.__PERF_DRIVE__) {
       let flushHandle: number | null = null
 
       const applyDelta = (delta: string) => {
-        if (!delta) return
+        if (!delta) {return}
         setMessages(prev =>
           prev.map(m => {
-            if (m.id !== msgId) return m
+            if (m.id !== msgId) {return m}
             const head = m.parts.slice(0, -1)
             const last = m.parts.at(-1)
             const lastText = last && last.type === 'text' ? last.text : ''
+
             return {
               ...m,
               parts: [...head, { type: 'text', text: lastText + delta }]
@@ -150,8 +159,12 @@ if (typeof window !== 'undefined' && !window.__PERF_DRIVE__) {
       }
 
       const scheduleFlush = () => {
-        if (flushHandle !== null) return
-        if (flushMinMs <= 0) { flushNow(); return }
+        if (flushHandle !== null) {return}
+
+        if (flushMinMs <= 0) { flushNow();
+
+ return }
+
         const since = performance.now() - lastFlushAt
         const wait = Math.max(0, flushMinMs - since)
         flushHandle =
@@ -162,17 +175,21 @@ if (typeof window !== 'undefined' && !window.__PERF_DRIVE__) {
 
       const handle: SyntheticDriverHandle = {
         stop: () => {
-          if (timer) clearTimeout(timer)
+          if (timer) {clearTimeout(timer)}
           timer = null
+
           if (flushHandle !== null) {
             clearTimeout(flushHandle)
             cancelAnimationFrame?.(flushHandle)
           }
+
           flushHandle = null
+
           if (pendingDelta) {
             applyDelta(pendingDelta)
             pendingDelta = ''
           }
+
           activeHandle = null
           // Mark message finalized.
           setMessages(prev =>
@@ -185,25 +202,33 @@ if (typeof window !== 'undefined' && !window.__PERF_DRIVE__) {
           setBusy(false)
         }
       }
+
       activeHandle = handle
 
       const tick = () => {
-        if (activeHandle !== handle) return
+        if (activeHandle !== handle) {return}
+
         if (pushed >= totalTokens) {
-          if (pendingDelta) flushNow()
+          if (pendingDelta) {flushNow()}
           handle.stop()
+
           return
         }
+
         pushed += 1
+
         if (flushMinMs > 0) {
           pendingDelta += chunk
           scheduleFlush()
         } else {
           applyDelta(chunk)
         }
+
         timer = setTimeout(tick, intervalMs)
       }
+
       timer = setTimeout(tick, intervalMs)
+
       return handle
     }
   }

@@ -320,10 +320,14 @@ def show_status(args):
         features = get_elidia_subscription_features(config)
         print()
         print(color("◆ Elidia Tool Gateway", Colors.CYAN, Colors.BOLD))
+        # Same `:<12}` field every other status label uses. These two lines
+        # hardcoded their own spacing, so the identical label rendered one
+        # column further right here than in the Auth Providers block above.
+        _gw_label = f"  {'Elidia Portal':<12}  "
         if not features.elidia_auth_present:
-            print("  Elidia Portal   ✗ not logged in")
+            print(f"{_gw_label}{check_mark(False)} not logged in")
         else:
-            print("  Elidia Portal   ✓ managed tools available")
+            print(f"{_gw_label}{check_mark(True)} managed tools available")
         for feature in features.items():
             if feature.managed_by_elidia:
                 state = "active via Elidia subscription"

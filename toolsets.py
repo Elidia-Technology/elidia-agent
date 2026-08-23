@@ -324,15 +324,20 @@ TOOLSETS = {
 
     "aiutils": {
         "description": (
-            "AiUtils Developer API tools — generation (image/video/audio/3D), "
-            "cost estimation, portal-tool execution, and embeddings. Opt-in; "
-            "each tool is gated on AIUTILS_API_KEY + the aiutils_sdk package "
-            "via check_fn. Billed calls fail closed when the DT balance is "
-            "insufficient."
+            "AiUtils Developer API tools — model discovery, generation "
+            "(image/video/audio/3D), cost estimation, portal-tool execution, "
+            "embeddings, and a unified RAG knowledge base. Opt-in; each tool is "
+            "gated on AIUTILS_API_KEY + "
+            "the aiutils_sdk package via check_fn. Billed calls fail closed "
+            "when the DT balance is insufficient; catalog reads are unbilled."
         ),
         "tools": [
+            "aiutils_model_catalog", "aiutils_model_info",
             "aiutils_generate", "aiutils_estimate", "aiutils_generation_get",
             "aiutils_tool_genres", "aiutils_tool_execute", "aiutils_embed",
+            "aiutils_rag_ingest", "aiutils_rag_search",
+            "aiutils_rag_collections", "aiutils_rag_documents",
+            "aiutils_model_for_task",
         ],
         "includes": []
     },

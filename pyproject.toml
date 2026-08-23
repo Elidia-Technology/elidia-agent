@@ -20,7 +20,10 @@ readme = "README.md"
 requires-python = ">=3.11,<3.14"
 authors = [{ name = "AiUtils" }]
 license = "MIT"
-license-files = ["LICENSE"]
+# NOTICE carries the upstream Nous Research (Hermes Agent) MIT attribution.
+# The MIT License requires that notice to travel with every distributed copy,
+# so it must ship in the wheel/sdist alongside LICENSE - not just live in the repo.
+license-files = ["LICENSE", "NOTICE"]
 dependencies = [
   # Core — every direct dep is exact-pinned to ==X.Y.Z (no ranges).
   # Rationale: ranges allow PyPI to ship a fresh version of a transitive
@@ -50,6 +53,12 @@ dependencies = [
   "tenacity==9.1.4",
   "pyyaml==6.0.3",
   "ruamel.yaml==0.18.17",
+  # OS credential store for the AiUtils Developer API key (elidia_cli/key_store).
+  # Pure Python; the platform backends it uses are already present on macOS and
+  # Windows. On a headless Linux box with no Secret Service it simply reports no
+  # backend and the key falls back to the environment, which is why the code
+  # treats it as optional even though it is declared here.
+  "keyring>=24,<27",
   "requests==2.33.0",  # CVE-2026-25645
   "jinja2==3.1.6",
   # Bumped from 2.12.5 to 2.13.4 to pull in pydantic-core 2.46.4.

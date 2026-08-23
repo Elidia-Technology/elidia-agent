@@ -23,10 +23,17 @@ def isolated_kanban_home(monkeypatch):
     test_home = tempfile.mkdtemp(prefix="kanban_cli_passthrough_")
     os.makedirs(os.path.join(test_home, "profiles", "default"), exist_ok=True)
     monkeypatch.setenv("ELIDIA_HOME", test_home)
-    for mod in list(sys.modules.keys()):
-        if mod.startswith("elidia_cli") or mod.startswith("elidia_state") or mod == "elidia_constants":
-            del sys.modules[mod]
-    yield test_home
+    from tests.elidia_cli.conftest import purge_elidia_modules, restore_elidia_modules
+
+    removed = purge_elidia_modules()
+    try:
+        yield test_home
+    finally:
+        # Without this the purge leaks: every already-collected test module
+        # keeps referencing the OLD module objects, so a later
+        # monkeypatch.setattr("elidia_cli.x.y", ...) patches a different copy
+        # and silently does nothing.
+        restore_elidia_modules(removed)
 
 
 def test_cli_dispatch_passes_max_in_progress_from_config(isolated_kanban_home, monkeypatch):

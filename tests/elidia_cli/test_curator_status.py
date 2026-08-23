@@ -67,15 +67,11 @@ def curator_status_env(tmp_path, monkeypatch):
     monkeypatch.setenv("ELIDIA_HOME", str(home))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-    import importlib
     import elidia_constants
-    importlib.reload(elidia_constants)
     from tools import skill_usage
-    importlib.reload(skill_usage)
     from agent import curator
-    importlib.reload(curator)
     from elidia_cli import curator as curator_cli
-    importlib.reload(curator_cli)
+    from tests.elidia_cli.conftest import temporarily_reloaded
 
     def _write_skill(name: str) -> None:
         d = skills / name
@@ -92,13 +88,17 @@ def curator_status_env(tmp_path, monkeypatch):
             f"# {name}\n"
         )
 
-    return {
-        "home": home,
-        "skills": skills,
-        "make_skill": _write_skill,
-        "skill_usage": skill_usage,
-        "curator_cli": curator_cli,
-    }
+    # See temporarily_reloaded: reloading these to pick up the fresh
+    # ELIDIA_HOME and walking away rebinds every class in them, which breaks
+    # isinstance checks in unrelated modules later in the run.
+    with temporarily_reloaded(elidia_constants, skill_usage, curator, curator_cli):
+        yield {
+            "home": home,
+            "skills": skills,
+            "make_skill": _write_skill,
+            "skill_usage": skill_usage,
+            "curator_cli": curator_cli,
+        }
 
 
 def _capture_status(curator_cli) -> str:

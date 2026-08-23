@@ -14,17 +14,20 @@ def test_no_duplicate_skills_subparser():
 
     if the duplicate 'skills' registration is reintroduced.
     """
-    # Force fresh import of the module where parser is constructed
-    # If there are duplicate 'skills' subparsers, this import will raise
-    # argparse.ArgumentError at module load time
-    import sys
-
-    # Remove cached module if present
-    if 'elidia_cli.main' in sys.modules:
-        del sys.modules['elidia_cli.main']
+    # Force a fresh import of the module where the parser is constructed. If
+    # there are duplicate 'skills' subparsers, this raises argparse.ArgumentError
+    # at module load time.
+    #
+    # `reimported` restores both sys.modules AND the elidia_cli.main package
+    # attribute afterwards. Restoring only sys.modules leaves the attribute
+    # pointing at the new module, which is exactly where
+    # monkeypatch.setattr("elidia_cli.main.x", ...) lands in other test files —
+    # see tests/elidia_cli/conftest.py::reimported.
+    from tests.elidia_cli.conftest import reimported
 
     try:
-        import elidia_cli.main  # noqa: F401
+        with reimported("elidia_cli.main"):
+            pass
     except argparse.ArgumentError as e:
         if "conflicting subparser" in str(e):
             raise AssertionError(

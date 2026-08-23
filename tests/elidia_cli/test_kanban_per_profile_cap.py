@@ -21,11 +21,14 @@ def isolated_kanban_home_with_profiles(monkeypatch):
     for prof in ("alpha", "beta", "default"):
         os.makedirs(os.path.join(test_home, "profiles", prof), exist_ok=True)
     monkeypatch.setenv("ELIDIA_HOME", test_home)
-    for mod in list(sys.modules.keys()):
-        if mod.startswith("elidia_cli") or mod.startswith("elidia_state") or mod == "elidia_constants":
-            del sys.modules[mod]
-    from elidia_cli import kanban_db
-    yield kanban_db
+    from tests.elidia_cli.conftest import purge_elidia_modules, restore_elidia_modules
+
+    removed = purge_elidia_modules()
+    try:
+        from elidia_cli import kanban_db
+        yield kanban_db
+    finally:
+        restore_elidia_modules(removed)
 
 
 def _fake_spawn(*args, **kwargs):

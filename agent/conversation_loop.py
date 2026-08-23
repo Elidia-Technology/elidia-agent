@@ -144,6 +144,21 @@ def _print_elidia_entitlement_guidance(agent, capability: str) -> bool:
 
 
 def _is_elidia_inference_route(provider: str, base_url: str) -> bool:
+    """True for the Elidia PORTAL inference route, which has paid entitlement.
+
+    Deliberately does NOT match ``developer-api.aiutils.io``. The two billing
+    systems are unrelated: the Portal runs on Portal credits with an entitlement
+    that can be refreshed, while the Developer API bills a DT wallet topped up
+    in the Developer Console. Refreshing a Portal entitlement cannot restore DT,
+    so routing a Developer API 402 through the entitlement-refresh path at the
+    call site below would retry against a wallet that is still empty.
+
+    A Developer API 402 is instead surfaced to the user by
+    ``tools/aiutils_client.handle_sdk_error``, which reports the shortfall and
+    links to the Developer Console top-up page.
+
+    The omission is intentional — do not "fix" it by adding developer-api here.
+    """
     provider = (provider or "").strip().lower()
     if provider == "elidia":
         return True
@@ -583,6 +598,28 @@ def run_conversation(
     messages.append(user_msg)
     current_turn_user_idx = len(messages) - 1
     agent._persist_user_message_idx = current_turn_user_idx
+
+    # Publish what this turn is doing, so a run that stops on an exhausted DT
+    # wallet can be resumed. The spend guard fires deep inside a tool handler,
+    # which knows the price and nothing else; without this the pause record was
+    # a balance and an empty step list — valid, and useless for picking the work
+    # back up. ``messages`` is passed by reference on purpose: completed steps
+    # are read out of it at pause time rather than counted alongside it, so they
+    # cannot drift from what actually ran. See tools/run_context.py.
+    try:
+        from tools.run_context import RunContext, set_run_context
+
+        set_run_context(RunContext(
+            session_id=agent.session_id,
+            task=original_user_message,
+            platform=getattr(agent, "platform", None),
+            task_id=effective_task_id,
+            turn_id=turn_id,
+            messages=messages,
+        ))
+    except Exception as exc:
+        # Resume bookkeeping is not worth failing a turn over.
+        logger.debug("Could not publish run context: %s", exc)
     
     if not agent.quiet_mode:
         _print_preview = _summarize_user_message_for_log(user_message)

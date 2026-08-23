@@ -25,9 +25,33 @@ const customRules = {
 
 export default [
   {
-    ignores: ['**/node_modules/**', '**/dist/**', 'src/**/*.js']
+    // `build/` and `release/` are electron-builder OUTPUT. They vendor
+    // node-pty's own sources and tests, which account for 564 of the 672
+    // errors this config reported — third-party bundled JS, linted as if it
+    // were ours. With --max-warnings=0 the gate could never pass, so it was
+    // effectively dead: nobody can act on a report that is 84% build artifacts.
+    // Same omission the vitest config had for `release/`.
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      'build/**',
+      'release/**',
+      'src/**/*.js'
+    ]
   },
   js.configs.recommended,
+  {
+    rules: {
+      // `try { fs.unlinkSync(tmp) } catch {}` before rejecting with the real
+      // error is correct: a failed cleanup must not mask the failure the caller
+      // actually needs. 17 of these are best-effort cleanup in bootstrap-runner.
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      // `const { kind, t: _t, ...rest } = e` discards a field on purpose. The
+      // underscore prefix is the convention for that; without this the linter
+      // reports an intentional discard as dead code.
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }]
+    }
+  },
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
@@ -109,11 +133,25 @@ export default [
   },
   {
     files: ['**/*.js', '**/*.cjs'],
-    ignores: ['**/node_modules/**', '**/dist/**'],
+    ignores: ['**/node_modules/**', '**/dist/**', 'build/**', 'release/**'],
     languageOptions: {
       ecmaVersion: 'latest',
       globals: { ...globals.node },
       sourceType: 'commonjs'
+    }
+  },
+  {
+    // ESM Node scripts (scripts/*.mjs). There was no block for .mjs at all, so
+    // they inherited no globals and every console/process/setTimeout/fetch read
+    // as undefined — 252 no-undef errors that were pure config, not code.
+    // `globals.browser` is included for fetch/WebSocket/setTimeout, which these
+    // scripts use against a running dashboard and which modern Node provides.
+    files: ['**/*.mjs'],
+    ignores: ['**/node_modules/**', '**/dist/**', 'build/**', 'release/**'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      globals: { ...globals.node, ...globals.browser },
+      sourceType: 'module'
     }
   },
   {

@@ -1,0 +1,117 @@
+{
+  "name": "elidia-agent-vscode",
+  "displayName": "Elidia Agent",
+  "description": "Elidia Agent in VS Code \u2014 chat, explain and fix against your own Elidia backend.",
+  "version": "2.0.10",
+  "publisher": "ElidiaTechnology",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0B0F19",
+    "theme": "dark"
+  },
+  "homepage": "https://aiutils.io/elidia",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Elidia-Technology/elidia-agent"
+  },
+  "bugs": {
+    "url": "https://github.com/Elidia-Technology/elidia-agent/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "chat",
+    "acp",
+    "elidia",
+    "copilot",
+    "assistant",
+    "refactor"
+  ],
+  "qna": false,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "elidia.chat",
+        "title": "Elidia: Open Chat"
+      },
+      {
+        "command": "elidia.explain",
+        "title": "Elidia: Explain Selection"
+      },
+      {
+        "command": "elidia.fix",
+        "title": "Elidia: Fix Selection"
+      },
+      {
+        "command": "elidia.selectModel",
+        "title": "Elidia: Select Model"
+      },
+      {
+        "command": "elidia.cancel",
+        "title": "Elidia: Cancel Current Turn"
+      },
+      {
+        "command": "elidia.restart",
+        "title": "Elidia: Restart Agent"
+      },
+      {
+        "command": "elidia.showLog",
+        "title": "Elidia: Show Log"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "elidia.explain",
+          "when": "editorHasSelection",
+          "group": "elidia@1"
+        },
+        {
+          "command": "elidia.fix",
+          "when": "editorHasSelection",
+          "group": "elidia@2"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "elidia.chat",
+        "key": "ctrl+alt+e",
+        "mac": "cmd+alt+e"
+      }
+    ],
+    "configuration": {
+      "title": "Elidia Agent",
+      "properties": {
+        "elidia.acpPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the `elidia-acp` executable. Leave empty to search PATH, then a Python that can run `python -m acp_adapter`."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "lint": "eslint src --ext ts",
+    "test": "node --test out/test/*.test.js",
+    "package": "npx --yes @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -30,8 +30,8 @@ load_dotenv()
 DEFAULT_DATASETS = [
     "AiUtils/swe-terminus-agent-glm-kimi-minimax",
     "AiUtils/elidia-agent-megascience-sft1",
-    "Hermes-Agent-Thinking-GLM-4.7-SFT2",
-    "Hermes-Agent-Thinking-GLM-4.7-SFT1",
+    "NousResearch/Hermes-Agent-Thinking-GLM-4.7-SFT2",
+    "NousResearch/Hermes-Agent-Thinking-GLM-4.7-SFT1",
     "AiUtils/terminal-tasks-glm-elidia-agent"
 ]
 

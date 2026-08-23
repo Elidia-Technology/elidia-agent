@@ -12032,7 +12032,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "computer-use",
         "config", "cron", "curator", "dashboard", "debug", "doctor",
         "dump", "fallback", "gateway", "hooks", "import", "insights",
-        "gui", "desktop", "kanban", "login", "logout", "logs", "lsp", "mcp", "memory", "migrate",
+        "gui", "desktop", "kanban", "key", "login", "logout", "logs", "lsp", "mcp", "memory", "migrate",
         "model", "pairing", "plugins", "portal", "postinstall", "profile", "proxy",
         "prompt-size",
         "send", "sessions", "setup",
@@ -12513,6 +12513,34 @@ def main():
         return 0
 
     secrets_parser.set_defaults(func=_dispatch_secrets)
+
+    # =========================================================================
+    # key command — where the AiUtils Developer API key is stored
+    # =========================================================================
+    key_parser = subparsers.add_parser(
+        "key",
+        help="Store the AiUtils Developer API key in the OS keychain",
+        description=(
+            "Elidia runs terminal commands, code sandboxes and MCP servers by "
+            "design, and every one of them inherits this process's environment. "
+            "A Developer API key kept in ~/.elidia/.env is therefore handed to "
+            "all of them. These commands move it into the OS credential store "
+            "instead, where it is read on demand rather than exported."
+        ),
+    )
+
+    # Lazy import — only pays for itself when this subcommand is used.
+    from elidia_cli import key_cli as _key_cli
+
+    _key_cli.register_cli(key_parser)
+
+    def _dispatch_key(args):  # noqa: ANN001
+        if getattr(args, "key_command", None) is None:
+            # Bare `elidia key` is a question, not a mistake — answer it.
+            return _key_cli.cmd_key_status(args)
+        return args.func(args)
+
+    key_parser.set_defaults(func=_dispatch_key)
 
     # =========================================================================
     # migrate command

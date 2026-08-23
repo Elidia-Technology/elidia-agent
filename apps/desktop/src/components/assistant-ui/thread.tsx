@@ -47,7 +47,7 @@ import {
 } from '@/app/chat/composer/rich-editor'
 import { detectTrigger, textBeforeCaret, type TriggerState } from '@/app/chat/composer/text-utils'
 import { ComposerTriggerPopover } from '@/app/chat/composer/trigger-popover'
-import { extractDroppedFiles, ELIDIA_PATHS_MIME } from '@/app/chat/hooks/use-composer-actions'
+import { ELIDIA_PATHS_MIME, extractDroppedFiles } from '@/app/chat/hooks/use-composer-actions'
 import { ClarifyTool } from '@/components/assistant-ui/clarify-tool'
 import { DirectiveContent, elidiaDirectiveFormatter } from '@/components/assistant-ui/directive-text'
 import { MarkdownText, MarkdownTextContent } from '@/components/assistant-ui/markdown-text'

@@ -20,14 +20,18 @@ def isolated_kanban_home(monkeypatch):
     test_home = tempfile.mkdtemp(prefix="kanban_default_assignee_test_")
     monkeypatch.setenv("ELIDIA_HOME", test_home)
     # Force-reimport so the fresh ELIDIA_HOME is picked up.
-    for mod in list(sys.modules.keys()):
-        if mod.startswith("elidia_cli") or mod.startswith("elidia_state") or mod == "elidia_constants":
-            del sys.modules[mod]
-    from elidia_cli import kanban_db
-    yield kanban_db, test_home
-    # Cleanup is best-effort; tempfile dir survives but pytest isolation
-    # gives each test its own monkeypatched ELIDIA_HOME so no cross-test
-    # contamination.
+    from tests.elidia_cli.conftest import purge_elidia_modules, restore_elidia_modules
+
+    removed = purge_elidia_modules()
+    try:
+        from elidia_cli import kanban_db
+        yield kanban_db, test_home
+    finally:
+        # The comment that used to sit here said the monkeypatched ELIDIA_HOME
+        # meant "no cross-test contamination". monkeypatch does restore the env
+        # var — but nothing restored sys.modules, and that leak is what
+        # contaminated the rest of the run.
+        restore_elidia_modules(removed)
 
 
 def _fake_spawn(*args, **kwargs):
