@@ -299,38 +299,76 @@ jobs:
              cp -f public/downloads/Elidia-Agent-latest-* dist/downloads/
              ls -la dist/downloads/ | head -20'
 
-      # Prove the release is actually reachable. A range request is the only
-      # honest check here: this site answers ANY unknown /downloads/ path with
-      # HTTP 200 and the SPA shell, so a missing file looks like a successful
-      # download of an 8KB HTML page named .dmg.
-      - name: Verify the published files are real
+      # Prove the release actually landed.
+      #
+      # This was first written as a public HTTPS range check, which is the right
+      # idea and the wrong vantage point: the CDN answers GitHub runner IPs with
+      # 403 on these paths, so every file failed while all six were verifiably
+      # real from a normal client. A gate that cannot distinguish "not published"
+      # from "not allowed to look" is worse than none.
+      #
+      # So verify over the SSH connection that just did the copy. It sees the
+      # served directory directly — no CDN, no cache, no WAF — and it can check
+      # what a range request cannot: that the file is the size and type expected.
+      - name: Verify the release landed in the served directory
+        env:
+          PROD_DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
         run: |
           set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "$PROD_DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${PROD_USER}@${PROD_HOST}" 'bash -s' <<'REMOTE'
+          set -u
+          cd /var/www/aiutils.io/frontend/dist/downloads || {
+            echo "::error::dist/downloads does not exist — nginx has nothing to serve"
+            exit 1
+          }
           fail=0
+          # 10MB floor: every real installer here is 90MB+, and the failure this
+          # catches is a stub or an HTML error page written under a .dmg name.
+          MIN=10485760
           for f in Elidia-Agent-latest-macOS-x64.dmg \
                    Elidia-Agent-latest-macOS-arm64.dmg \
                    Elidia-Agent-latest-linux.deb \
                    Elidia-Agent-latest-linux.AppImage \
+                   Elidia-Agent-latest-linux.rpm \
                    Elidia-Agent-latest-windows.exe \
                    Elidia-Agent-latest-windows.msi; do
-            code=000
-            # Retry with a cache-busting query. The CDN can still be serving the
-            # pre-upload response — for a file that did not exist a moment ago
-            # that cached response is the SPA shell with HTTP 200, so a check run
-            # immediately after SCP can fail against a file that is genuinely
-            # there. Verified: this step failed while all six were already real.
-            for attempt in 1 2 3 4 5; do
-              code=$(curl -s -o /dev/null -w '%{http_code}' -r 0-100 \
-                -H 'Cache-Control: no-cache' \
-                "https://aiutils.io/downloads/$f?cb=${GITHUB_RUN_ID}-$attempt" || echo 000)
-              [ "$code" = "206" ] && break
-              sleep 10
-            done
-            if [ "$code" = "206" ]; then
-              echo "ok   $f"
-            else
-              echo "::error::$f is not a real download (HTTP $code — SPA fallback)"
+            if [ ! -f "$f" ]; then
+              echo "::error::$f is not in the served directory"
               fail=1
+              continue
             fi
+            size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f")
+            if [ "$size" -lt "$MIN" ]; then
+              echo "::error::$f is only ${size} bytes — not a real installer"
+              fail=1
+              continue
+            fi
+            printf 'ok   %-42s %s bytes  %s\n' "$f" "$size" "$(date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '')"
           done
           exit $fail
+          REMOTE
+
+      # Public reachability, reported but NOT fatal. A 403 here means the CDN
+      # declined this runner, which says nothing about whether the release is
+      # good — the SSH check above is the authority.
+      - name: Report public reachability (informational)
+        continue-on-error: true
+        run: |
+          for f in Elidia-Agent-latest-macOS-x64.dmg \
+                   Elidia-Agent-latest-macOS-arm64.dmg \
+                   Elidia-Agent-latest-linux.deb \
+                   Elidia-Agent-latest-windows.exe; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -r 0-100 \
+              "https://aiutils.io/downloads/$f" || echo 000)
+            case "$code" in
+              206|200) echo "reachable      $f (HTTP $code)" ;;
+              403)     echo "cdn-blocked    $f (HTTP 403 — runner IP declined, not a release fault)" ;;
+              *)       echo "unexpected     $f (HTTP $code)" ;;
+            esac
+          done
