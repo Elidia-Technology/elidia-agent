@@ -136,7 +136,7 @@ scripts/out/
 # stores the published notes. They are not a build artifact and must never be
 # committed to the repo root. See the elidia-release skill.
 RELEASE_v*.md
-CLAUDE.md
+/CLAUDE.md
 # Project instructions + local agent config — never in the public mirror
 .envrc
 .claude/
@@ -151,3 +151,52 @@ apps/mobile/dist/
 apps/mobile/node_modules/
 apps/mobile/src-tauri/target/
 apps/mobile/src-tauri/gen/
+
+# ── Internal working documents ───────────────────────────────────────────────
+# This repo is mirrored to a PUBLIC GitHub repo, so anything tracked here is
+# published the moment it is pushed. Root-level markdown is therefore an
+# ALLOWLIST: a new stray note at the repo root stays private unless it is
+# explicitly un-ignored below.
+/.plans/
+/plans/
+/*.md
+!/README.md
+!/README.in.md
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/AGENTS.md
+!/CHANGELOG.md
+#
+# Deliberately NOT ignored: skills/**, optional-skills/**, website/**, docs/**
+# and plugins/**. Those .md files are product, not prose — SKILL.md is loaded
+# at runtime by tools/skills_tool.py (96 of them), and website/ is the source
+# of the published documentation site built by .github/workflows/deploy-site.yml.
+# A blanket **/*.md rule would silently break the agent's skill system and the
+# docs site, so the rules above are scoped to the root and to planning dirs.
+
+# ── Deployment / infrastructure ──────────────────────────────────────────────
+# Server-side deploy material must never be committed; CI reads host, user and
+# key from GitHub Actions secrets instead.
+deploy.sh
+deploy-*.sh
+*.deploy.yml
+ansible/
+*.tfvars
+*.tfstate
+*.tfstate.*
+.terraform/
+authorized_keys
+known_hosts
+*.retry
+
+# ── Key material ─────────────────────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+!*.public.pem
+id_rsa
+id_ed25519
+*.ppk

@@ -4,13 +4,14 @@ name: Build Elidia Agent Desktop
 # then uploads the installers to the production download host (aiutils.io).
 #
 # Source lives on GitLab; this workflow runs on the GitHub mirror
-# (Elidia-Technology/elidia-agent-cli-v2) which is the build + release channel.
+# (Elidia-Technology/elidia-agent) which is the build + release channel.
 #
 # Required secrets (GitHub -> Settings -> Secrets and variables -> Actions):
 #   PROD_DEPLOY_KEY : private key of a dedicated deploy keypair whose public key
 #                     is in the prod server's authorized_keys (scoped to upload).
-#   PROD_HOST       : e.g. 167.86.89.198
-#   PROD_USER       : e.g. aiutils
+#   PROD_HOST       : hostname or IP of the download host (value lives in the
+#                     repo secret, never in this file — this workflow is public).
+#   PROD_USER       : SSH user for that host (likewise secret-only).
 #
 # NOTE: signing/notarization (mac hardenedRuntime + afterSign notarize.cjs,
 #       Windows code signing) is intentionally NOT wired here yet. This produces
@@ -151,9 +152,6 @@ jobs:
 
       # The .deb shipped for months declaring nine dependencies while the binary
       # linked against eleven. apt install succeeded and the app would not
-      # start. ldd against ONLY the declared set is what catches that.
-      # The .deb shipped for months declaring nine dependencies while the binary
-      # linked against eleven. apt install succeeded and the app would not
       # start. Installing ONLY the declared set and running ldd is what catches
       # that.
       #
@@ -239,9 +237,15 @@ jobs:
             fi
             cp "$src" "Elidia-Agent-latest-macOS-$arch.dmg"
           done
-          # Keep the unsuffixed name pointing at Apple Silicon for older links
-          # and bookmarks. New links on the download page are arch-explicit.
-          cp Elidia-Agent-latest-macOS-arm64.dmg Elidia-Agent-latest-macOS.dmg
+          # The unsuffixed name is the compatibility fallback for older links
+          # and bookmarks, so it MUST be the build that runs on every Mac. That
+          # is x64: Rosetta 2 translates x64 -> Apple Silicon, and there is no
+          # translation in the other direction. Aliasing this to arm64 (as it
+          # did until 2026-08-24) handed Intel users a binary their machine
+          # cannot execute at all. Arch-explicit links on the download page give
+          # each Mac its native build; this is only the net for whoever arrives
+          # without one.
+          cp Elidia-Agent-latest-macOS-x64.dmg Elidia-Agent-latest-macOS.dmg
           # `find … | head -n1 | xargs -I{} cp {} dest` does NOTHING when find
           # matches nothing — xargs with empty input is a no-op, the pipeline
           # still exits 0, and `set -euo pipefail` sees success. A missing
