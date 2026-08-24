@@ -242,13 +242,30 @@ jobs:
           # Keep the unsuffixed name pointing at Apple Silicon for older links
           # and bookmarks. New links on the download page are arch-explicit.
           cp Elidia-Agent-latest-macOS-arm64.dmg Elidia-Agent-latest-macOS.dmg
-          # Windows -> Elidia-Agent-latest-windows.{exe,msi}
-          find win -name '*.exe' ! -name '*.blockmap' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-windows.exe
-          find win -name '*.msi' ! -name '*.blockmap' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-windows.msi
-          # Linux -> Elidia-Agent-latest-linux.{AppImage,deb,rpm}
-          find linux -name '*.AppImage' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-linux.AppImage
-          find linux -name '*.deb' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-linux.deb
-          find linux -name '*.rpm' | head -n1 | xargs -I{} cp {} Elidia-Agent-latest-linux.rpm
+          # `find … | head -n1 | xargs -I{} cp {} dest` does NOTHING when find
+          # matches nothing — xargs with empty input is a no-op, the pipeline
+          # still exits 0, and `set -euo pipefail` sees success. A missing
+          # installer therefore left the PREVIOUS release in place and the job
+          # went green. That is how Elidia-Agent-latest-windows.exe stayed three
+          # hours older than every other artifact in the same publish.
+          #
+          # Copy explicitly and fail loudly instead.
+          publish() {
+            local dir="$1" pattern="$2" dest="$3"
+            local src
+            src=$(find "$dir" -name "$pattern" ! -name '*.blockmap' | head -n1)
+            if [ -z "$src" ]; then
+              echo "::error::no $pattern in $dir — refusing to publish a release missing $dest"
+              exit 1
+            fi
+            cp "$src" "$dest"
+            echo "  $dest <- $src"
+          }
+          publish win   '*.exe'      Elidia-Agent-latest-windows.exe
+          publish win   '*.msi'      Elidia-Agent-latest-windows.msi
+          publish linux '*.AppImage' Elidia-Agent-latest-linux.AppImage
+          publish linux '*.deb'      Elidia-Agent-latest-linux.deb
+          publish linux '*.rpm'      Elidia-Agent-latest-linux.rpm
           ls -la Elidia-Agent-latest-*
 
       - name: Upload to production via SCP
@@ -296,8 +313,19 @@ jobs:
                    Elidia-Agent-latest-linux.AppImage \
                    Elidia-Agent-latest-windows.exe \
                    Elidia-Agent-latest-windows.msi; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' -r 0-100 \
-              "https://aiutils.io/downloads/$f" || echo 000)
+            code=000
+            # Retry with a cache-busting query. The CDN can still be serving the
+            # pre-upload response — for a file that did not exist a moment ago
+            # that cached response is the SPA shell with HTTP 200, so a check run
+            # immediately after SCP can fail against a file that is genuinely
+            # there. Verified: this step failed while all six were already real.
+            for attempt in 1 2 3 4 5; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -r 0-100 \
+                -H 'Cache-Control: no-cache' \
+                "https://aiutils.io/downloads/$f?cb=${GITHUB_RUN_ID}-$attempt" || echo 000)
+              [ "$code" = "206" ] && break
+              sleep 10
+            done
             if [ "$code" = "206" ]; then
               echo "ok   $f"
             else

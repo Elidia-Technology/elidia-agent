@@ -145,3 +145,9 @@ CLAUDE.md
 apps/vscode/out/
 apps/vscode/node_modules/
 apps/vscode/*.vsix
+
+# Mobile build output
+apps/mobile/dist/
+apps/mobile/node_modules/
+apps/mobile/src-tauri/target/
+apps/mobile/src-tauri/gen/
