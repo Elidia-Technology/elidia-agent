@@ -189,6 +189,7 @@ See [docs/migrate-from-openclaw.md](docs/migrate-from-openclaw.md) for the compl
 This public repository hosts the **packaged releases and documentation** for Elidia Agent. The source code is developed in a private repository and distributed as build artefacts on [PyPI](https://pypi.org/project/elidia-agent-cli/).
 
 - **Latest release:** see the [Releases](https://github.com/Elidia-Technology/elidia-agent/releases) page for the current `.whl` and `.tar.gz` build artefacts.
+- **All-platform downloads:** desktop installers (macOS `.dmg`, Windows `.exe`/`.msi`, Linux `.deb`/`.AppImage`/`.rpm`), Android (`.apk` + `.aab`), and the VS Code extension (Marketplace: `ElidiaTechnology.elidia-agent-vscode`) are published on [aiutils.io/elidia](https://aiutils.io/elidia).
 - **Documentation:** [aiutils.io/elidia](https://aiutils.io/elidia)
 - **Developer console:** [developer.aiutils.io](https://developer.aiutils.io)
 - **Report a bug / request a feature:** open an [Issue](https://github.com/Elidia-Technology/elidia-agent/issues)

@@ -64,7 +64,11 @@ jobs:
           # in every deploy. Failure is non-fatal: extract-skills.py will
           # fall back to the legacy snapshot cache and the Skills Hub page
           # still renders, just without the latest community catalog.
-          python3 scripts/build_skills_index.py || echo "Skills index build failed (non-fatal)"
+          # `timeout` bounds the crawl: individual httpx calls carry their own
+          # timeouts, but a hung source can otherwise stall the whole deploy.
+          # On timeout/error the non-fatal fallback keeps the docs site building
+          # from the legacy snapshot cache.
+          timeout 300 python3 scripts/build_skills_index.py || echo "Skills index build failed (non-fatal)"
 
       - name: Extract skill metadata for dashboard
         run: python3 website/scripts/extract-skills.py
