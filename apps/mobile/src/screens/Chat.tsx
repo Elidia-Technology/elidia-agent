@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
+import bannerDark from '../assets/banner-dark.png'
+import bannerLight from '../assets/banner-light.png'
+import elidiaMark from '../assets/elidia-mark.png'
 import { Gateway, GatewayError, Message } from '../lib/gateway'
 
 /**
@@ -113,11 +116,33 @@ export function Chat({
       <div className="log" ref={log}>
         {loading && <p className="muted center">Loading…</p>}
         {!loading && messages.length === 0 && (
-          <p className="muted center">Ask Elidia something about your workspace.</p>
+          <div className="intro">
+            {/* Two variants switched in CSS by prefers-color-scheme, the same
+                signal the rest of the app's colours follow. The wordmark is
+                near-black in one and near-white in the other, so a single
+                image would vanish on one of the two grounds. Only the visible
+                one carries alt text — a screen reader should hear the product
+                name once, not twice. */}
+            <img alt="Elidia Agent" className="banner banner-light" src={bannerLight} />
+            <img alt="" aria-hidden="true" className="banner banner-dark" src={bannerDark} />
+            <p className="muted center">Ask Elidia something about your workspace.</p>
+          </div>
         )}
         {messages.map((m, i) => (
           <div key={i} className={`turn ${m.role}`}>
-            <div className="role">{m.role === 'user' ? 'you' : 'elidia'}</div>
+            <div className="role">
+              {m.role === 'user' ? (
+                // A glyph, not a photo: this screen has no identity for the
+                // person holding the phone, and drawing a face for them would
+                // be an invention.
+                <span aria-hidden="true" className="avatar avatar-user">
+                  ●
+                </span>
+              ) : (
+                <img alt="" aria-hidden="true" className="avatar" src={elidiaMark} />
+              )}
+              <span>{m.role === 'user' ? 'you' : 'elidia'}</span>
+            </div>
             <div className="body">
               {m.content || (busy && i === messages.length - 1 ? '…' : '')}
             </div>

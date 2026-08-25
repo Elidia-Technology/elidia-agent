@@ -1461,6 +1461,57 @@ async def get_action_status(name: str, lines: int = 200):
     }
 
 
+@app.get("/api/account")
+async def get_account_profile():
+    """The signed-in AiUtils user, for clients that can show one.
+
+    Serves the desktop and any other graphical surface an avatar and a name.
+    The renderer cannot reach the Developer API itself — the API key lives here,
+    in the CLI process, and deliberately never travels to the browser context —
+    so this is the bridge.
+
+    Returns ``configured: false`` rather than an error when no AiUtils key is
+    set. Running Elidia without an AiUtils account is a supported way to use it,
+    not a fault, and a client that sees an error will draw one.
+    """
+    _log.debug("Entered into get_account_profile")
+    try:
+        from tools import aiutils_client
+    except Exception as exc:
+        _log.warning("aiutils client unavailable: %s", exc)
+        return {"configured": False, "reason": "AiUtils client unavailable"}
+
+    # check_aiutils_requirements returns a plain bool, not (ok, detail).
+    # Unpacking it raised TypeError on every call where no key was set — which
+    # is the common case for anyone running Elidia without an AiUtils account.
+    if not aiutils_client.check_aiutils_requirements():
+        return {
+            "configured": False,
+            "reason": "No AiUtils API key is configured for this Elidia install.",
+        }
+
+    try:
+        profile = aiutils_client.get_client().account.profile()
+    except Exception as exc:
+        _log.warning("account profile lookup failed: %s", exc)
+        # Not a 500: the desktop asks for this on every launch, and a transient
+        # gateway problem should degrade the avatar, not the app.
+        return {"configured": True, "available": False, "reason": str(exc)[:200]}
+
+    # Only what a client can actually draw. bio, country, state, city and the
+    # account-status flags are deliberately not forwarded — the renderer has no
+    # use for them, and the less identity that crosses into the browser
+    # context, the less there is to leak from it.
+    return {
+        "configured": True,
+        "available": True,
+        "id": profile.get("id"),
+        "full_name": profile.get("full_name"),
+        "email": profile.get("email"),
+        "avatar_url": profile.get("avatar_url"),
+    }
+
+
 @app.get("/api/sessions")
 async def get_sessions(
     limit: int = 20,

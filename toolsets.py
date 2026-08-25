@@ -50,6 +50,10 @@ _ELIDIA_CORE_TOOLS = [
     "todo", "memory",
     # Session history search
     "session_search",
+    # Deep-research loop substrate (state + sufficiency floor)
+    "research_state", "research_gate", "research_personas", "research_deck",
+    # Authoritative domain sources (PubMed, trials, proteins, structures, citations)
+    "research_sources",
     # Clarifying questions
     "clarify",
     # Code execution + delegation
@@ -92,6 +96,19 @@ TOOLSETS = {
         "tools": ["web_search", "web_extract"],
         "includes": []  # No other toolsets included
     },
+
+    "deep_research": {
+        "description": (
+            "Substrate for the autonomous deep-research loop: durable run state "
+            "(claims, sources, gaps, rounds) plus a code-enforced sufficiency "
+            "floor. The loop itself is agent behaviour taught by the "
+            "deep-research skill; these two tools are what stop it drifting."
+        ),
+        "tools": ["research_state", "research_gate", "research_personas",
+                  "research_deck", "research_sources"],
+        "includes": []
+    },
+
     
     "search": {
         "description": "Web search only (no content extraction/scraping)",
@@ -326,7 +343,8 @@ TOOLSETS = {
         "description": (
             "AiUtils Developer API tools — model discovery, generation "
             "(image/video/audio/3D), cost estimation, portal-tool execution, "
-            "embeddings, and a unified RAG knowledge base. Opt-in; each tool is "
+            "embeddings, a unified RAG knowledge base, and the user's stored "
+            "files including their encrypted vault. Opt-in; each tool is "
             "gated on AIUTILS_API_KEY + "
             "the aiutils_sdk package via check_fn. Billed calls fail closed "
             "when the DT balance is insufficient; catalog reads are unbilled."
@@ -338,6 +356,9 @@ TOOLSETS = {
             "aiutils_rag_ingest", "aiutils_rag_search",
             "aiutils_rag_collections", "aiutils_rag_documents",
             "aiutils_model_for_task",
+            "aiutils_files",
+            "aiutils_corpus",
+            "aiutils_account",
         ],
         "includes": []
     },
@@ -377,6 +398,8 @@ TOOLSETS = {
             "browser_press", "browser_get_images",
             "browser_vision", "browser_console", "browser_cdp", "browser_dialog",
             "todo", "memory",
+            "research_state", "research_gate", "research_personas", "research_deck",
+            "research_sources",
             "session_search",
             "execute_code", "delegate_task",
         ],
@@ -394,6 +417,9 @@ TOOLSETS = {
             "read_file", "write_file", "patch", "search_files",
             # Vision + image generation
             "vision_analyze", "image_generate",
+            # Deep-research loop substrate
+            "research_state", "research_gate", "research_personas", "research_deck",
+            "research_sources",
             # Skills
             "skills_list", "skill_view", "skill_manage",
             # Browser automation

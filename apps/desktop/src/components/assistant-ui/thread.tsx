@@ -61,7 +61,9 @@ import { ActivityTimerText } from '@/components/chat/activity-timer-text'
 import { DisclosureRow } from '@/components/chat/disclosure-row'
 import { GeneratedImageProvider, useGeneratedImageContext } from '@/components/chat/generated-image-context'
 import { ImageGenerationPlaceholder } from '@/components/chat/image-generation-placeholder'
+import { useAccount } from '@/app/hooks/use-account'
 import { Intro, type IntroProps } from '@/components/chat/intro'
+import { AssistantAvatar, UserAvatar } from '@/components/chat/message-avatar'
 import { PreviewAttachment } from '@/components/chat/preview-attachment'
 import { Codicon } from '@/components/ui/codicon'
 import { CopyButton } from '@/components/ui/copy-button'
@@ -235,13 +237,15 @@ const AssistantMessage: FC<{ onBranchInNewChat?: (messageId: string) => void }> 
       data-streaming={messageStatus === 'running' ? 'true' : undefined}
       ref={enterRef}
     >
-      <div
-        className={cn(
-          'wrap-anywhere min-w-0 max-w-full overflow-hidden text-pretty text-[length:var(--conversation-text-font-size)] leading-(--dt-line-height) text-foreground',
-          interruptedOnly && 'text-[0.8rem] leading-5 text-muted-foreground/82'
-        )}
-        data-slot="aui_assistant-message-content"
-      >
+      <div className="flex w-full min-w-0 max-w-full gap-2.5">
+        <AssistantAvatar className="mt-0.5" />
+        <div
+          className={cn(
+            'wrap-anywhere min-w-0 max-w-full flex-1 overflow-hidden text-pretty text-[length:var(--conversation-text-font-size)] leading-(--dt-line-height) text-foreground',
+            interruptedOnly && 'text-[0.8rem] leading-5 text-muted-foreground/82'
+          )}
+          data-slot="aui_assistant-message-content"
+        >
         {hoistedTodos.length > 0 && <HoistedTodoPanel todos={hoistedTodos} />}
         <MessagePrimitive.Parts components={MESSAGE_PARTS_COMPONENTS} />
         {previewTargets.length > 0 && (
@@ -258,7 +262,8 @@ const AssistantMessage: FC<{ onBranchInNewChat?: (messageId: string) => void }> 
           >
             <ErrorPrimitive.Message />
           </ErrorPrimitive.Root>
-        </MessagePrimitive.Error>
+          </MessagePrimitive.Error>
+        </div>
       </div>
       {messageText.trim().length > 0 && !interruptedOnly && (
         <AssistantFooter messageId={messageId} messageText={messageText} onBranchInNewChat={onBranchInNewChat} />
@@ -672,6 +677,7 @@ const UserMessage: FC<{
   const content = useAuiState(s => s.message.content)
   const messageText = messageContentText(content)
   const threadRunning = useAuiState(s => s.thread.isRunning)
+  const { account } = useAccount()
 
   const latestUserId = useAuiState(s => {
     for (let i = s.thread.messages.length - 1; i >= 0; i--) {
@@ -753,7 +759,12 @@ const UserMessage: FC<{
       <StickyHumanMessageContainer>
         <ActionBarPrimitive.Root className="relative w-full max-w-full" data-slot="aui_user-bubble-actions">
           <div className="human-message-with-todos-wrapper flex w-full flex-col gap-0">
-            <div className="relative w-full">
+            {/* The avatar sits beside the bubble rather than inside it: the
+                bubble is a sticky, clamping, editable button, and putting a
+                sibling inside it would land the avatar in the edit target and
+                inside the two-line clamp. */}
+            <div className="relative flex w-full items-start gap-2.5">
+              <UserAvatar account={account} className="mt-0.5" />
               {threadRunning ? (
                 <div className={bubbleClassName}>{bubbleContent}</div>
               ) : (
