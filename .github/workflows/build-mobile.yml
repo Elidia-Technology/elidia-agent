@@ -88,11 +88,12 @@ jobs:
       - name: Verify artifacts are real installers
         run: |
           set -euo pipefail
+          cd apps/mobile/src-tauri/gen/android/app/build/outputs
           # A real APK/AAB is multi-MB; a stub is far smaller. The failure this
           # catches is an empty or errored build written under a .apk name.
           MIN=5000000
           for f in Elidia-Agent-latest-android.apk Elidia-Agent-latest-android.aab; do
-            size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f")
+            size=$(wc -c < "$f")
             if [ "$size" -lt "$MIN" ]; then
               echo "::error::$f is only ${size} bytes — not a real installer"
               exit 1
