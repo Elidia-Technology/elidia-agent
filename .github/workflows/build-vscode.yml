@@ -51,20 +51,28 @@ jobs:
         working-directory: apps/vscode
         run: npx --yes @vscode/vsce package --no-dependencies
 
-      - name: Verify the .vsix exists and is non-trivial
+      - name: Verify the .vsix is a real, non-empty extension
         working-directory: apps/vscode
         run: |
           set -euo pipefail
           VSIX=$(ls *.vsix | head -1)
           test -n "$VSIX" || { echo "::error::no .vsix produced"; exit 1; }
           size=$(stat -c%s "$VSIX" 2>/dev/null || stat -f%z "$VSIX")
-          # A real extension bundle is 100KB+; a stub or an error page is far
-          # smaller, and the failure this catches is packaging an empty out/.
-          if [ "$size" -lt 100000 ]; then
-            echo "::error::$VSIX is only ${size} bytes — not a real extension"
+          # This extension is deliberately minimal: 793 lines of TS compiled
+          # with --no-dependencies and no source maps, so the .vsix is ~40-50KB.
+          # An empty/stub out/ is a few KB at most. Guard against the latter,
+          # not the former.
+          if [ "$size" -lt 10000 ]; then
+            echo "::error::$VSIX is only ${size} bytes — likely an empty stub"
             exit 1
           fi
-          echo "packaged $VSIX (${size} bytes)"
+          # The compiled entry point must actually register the extension, not
+          # be an empty placeholder. vsce stores files under extension/.
+          if ! unzip -p "$VSIX" 'extension/out/extension.js' | grep -q 'activate'; then
+            echo "::error::$VSIX is missing a compiled activate() entry point"
+            exit 1
+          fi
+          echo "packaged $VSIX (${size} bytes) — out/extension.js contains activate()"
 
       - name: Upload .vsix artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
