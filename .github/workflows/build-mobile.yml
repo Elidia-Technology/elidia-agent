@@ -1,0 +1,193 @@
+name: Build Elidia Agent Mobile
+
+# Builds the Tauri mobile app (apps/mobile) for Android — a universal APK and
+# an AAB — then uploads them to the production download host (aiutils.io) as
+# direct side-load downloads (Elidia-Agent-latest-android.apk / .aab).
+#
+# iOS is deliberately out of scope here: it needs a macOS runner + Xcode +
+# Apple code signing, which is a follow-up once those are provisioned.
+#
+# Source lives on GitLab; this workflow runs on the GitHub mirror
+# (Elidia-Technology/elidia-agent) which is the build + release channel.
+#
+# Required secrets (GitHub -> Settings -> Secrets and variables -> Actions),
+# identical to build-desktop.yml:
+#   PROD_DEPLOY_KEY : deploy keypair private key (public key on prod authorized_keys)
+#   PROD_HOST       : download host hostname/IP
+#   PROD_USER       : SSH user
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'apps/mobile/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/build-mobile.yml'
+
+permissions:
+  contents: read
+
+env:
+  # Tauri's Android build keys off ANDROID_HOME; setup-android@v3 sets both,
+  # but pinning here makes the intent explicit and guards the license step.
+  ANDROID_HOME: ${{ github.workspace }}/android-sdk
+
+jobs:
+  build-android:
+    name: Android (apk + aab)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@99b8673ff64fbf99d8d325f52d9a5bdedb8483e9  # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@00854ea68c109d98c75d956347303bf7c45b0277  # v3
+        with:
+          # Tauri's generated Gradle project declares its own compileSdk/NDK;
+          # Gradle auto-installs any missing platform or NDK once licenses are
+          # accepted, so we install the common baseline and let Gradle fill in.
+          packages: |
+            platform-tools
+            platforms;android-34
+            build-tools;34.0.0
+
+      - name: Accept SDK licenses (lets Gradle auto-install the NDK)
+        run: |
+          set -euo pipefail
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+
+      - name: Set up Rust (Android targets)
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      # apps/mobile is an npm workspace member; a single root `npm ci` installs
+      # the @tauri-apps/cli devDependency that `tauri android *` needs.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Initialize Android project (generates src-tauri/gen/android)
+        working-directory: apps/mobile
+        run: npx tauri android init
+
+      - name: Build Android (apk + aab)
+        working-directory: apps/mobile
+        run: npx tauri android build
+
+      - name: Locate and normalize artifacts
+        run: |
+          set -euo pipefail
+          cd apps/mobile/src-tauri/gen/android/app/build/outputs
+          # Tauri "bundle.targets: all" emits a universal APK and an AAB.
+          APK=$(find apk -name '*.apk' ! -name '*.unsigned.apk' | head -1)
+          AAB=$(find bundle -name '*.aab' | head -1)
+          test -n "$APK" || { echo "::error::no APK produced"; find . -type f | head -50; exit 1; }
+          test -n "$AAB" || { echo "::error::no AAB produced"; find . -type f | head -50; exit 1; }
+          cp "$APK" Elidia-Agent-latest-android.apk
+          cp "$AAB" Elidia-Agent-latest-android.aab
+          ls -la Elidia-Agent-latest-android.*
+
+      - name: Verify artifacts are real installers
+        run: |
+          set -euo pipefail
+          # A real APK/AAB is multi-MB; a stub is far smaller. The failure this
+          # catches is an empty or errored build written under a .apk name.
+          MIN=5000000
+          for f in Elidia-Agent-latest-android.apk Elidia-Agent-latest-android.aab; do
+            size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f")
+            if [ "$size" -lt "$MIN" ]; then
+              echo "::error::$f is only ${size} bytes — not a real installer"
+              exit 1
+            fi
+            printf 'ok   %-42s %s bytes\n' "$f" "$size"
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: mobile-android
+          path: |
+            apps/mobile/src-tauri/gen/android/app/build/outputs/Elidia-Agent-latest-android.apk
+            apps/mobile/src-tauri/gen/android/app/build/outputs/Elidia-Agent-latest-android.aab
+          if-no-files-found: error
+
+  upload-prod:
+    name: Upload installers to production
+    needs: build-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: mobile-android
+          path: artifacts
+
+      - name: Upload to production via SCP
+        env:
+          PROD_DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "$PROD_DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            artifacts/Elidia-Agent-latest-android.apk \
+            artifacts/Elidia-Agent-latest-android.aab \
+            "${PROD_USER}@${PROD_HOST}:/var/www/aiutils.io/frontend/public/downloads/"
+          # public/ is the source, dist/ is what nginx serves — copy into both
+          # so the release is live immediately and survives the next build.
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${PROD_USER}@${PROD_HOST}" \
+            'set -e
+             cd /var/www/aiutils.io/frontend
+             mkdir -p dist/downloads
+             cp -f public/downloads/Elidia-Agent-latest-android.apk dist/downloads/
+             cp -f public/downloads/Elidia-Agent-latest-android.aab dist/downloads/
+             ls -la dist/downloads/Elidia-Agent-latest-android.*'
+
+      - name: Verify the release landed in the served directory
+        env:
+          PROD_DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "$PROD_DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${PROD_USER}@${PROD_HOST}" 'bash -s' <<'REMOTE'
+          set -u
+          cd /var/www/aiutils.io/frontend/dist/downloads || {
+            echo "::error::dist/downloads does not exist"
+            exit 1
+          }
+          fail=0
+          MIN=5000000
+          for f in Elidia-Agent-latest-android.apk Elidia-Agent-latest-android.aab; do
+            if [ ! -f "$f" ]; then
+              echo "::error::$f is not in the served directory"
+              fail=1
+              continue
+            fi
+            size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f")
+            if [ "$size" -lt "$MIN" ]; then
+              echo "::error::$f is only ${size} bytes — not a real installer"
+              fail=1
+              continue
+            fi
+            printf 'ok   %-42s %s bytes\n' "$f" "$size"
+          done
+          exit $fail
+          REMOTE

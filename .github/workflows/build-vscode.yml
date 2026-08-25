@@ -1,0 +1,118 @@
+name: Build VS Code Extension
+
+# Packages the VS Code extension (apps/vscode) into a .vsix and uploads it as a
+# workflow artifact. The extension is published to the Visual Studio Marketplace
+# (ElidiaTechnology.elidia-agent-vscode) by the maintainer — this workflow only
+# produces the artifact; it deliberately does NOT call `vsce publish`.
+#
+# The .vsix is also uploaded to the production download host
+# (aiutils.io/downloads/elidia-agent-vscode-latest.vsix) as the side-load
+# fallback for users who do not use the Marketplace.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'apps/vscode/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/build-vscode.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package .vsix
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # apps/vscode is an npm workspace member (apps/*), so a single root
+      # `npm ci` installs its devDependencies (typescript, @types/vscode,
+      # @types/node) hoisted into the root node_modules.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile extension (tsc -> out/extension.js)
+        run: npm run compile --workspace apps/vscode
+
+      # `vsce package` must run from apps/vscode (where package.json + the
+      # manifest live). `--no-dependencies` skips a nested npm install because
+      # the workspace install above already resolved everything.
+      - name: Package .vsix
+        working-directory: apps/vscode
+        run: npx --yes @vscode/vsce package --no-dependencies
+
+      - name: Verify the .vsix exists and is non-trivial
+        working-directory: apps/vscode
+        run: |
+          set -euo pipefail
+          VSIX=$(ls *.vsix | head -1)
+          test -n "$VSIX" || { echo "::error::no .vsix produced"; exit 1; }
+          size=$(stat -c%s "$VSIX" 2>/dev/null || stat -f%z "$VSIX")
+          # A real extension bundle is 100KB+; a stub or an error page is far
+          # smaller, and the failure this catches is packaging an empty out/.
+          if [ "$size" -lt 100000 ]; then
+            echo "::error::$VSIX is only ${size} bytes — not a real extension"
+            exit 1
+          fi
+          echo "packaged $VSIX (${size} bytes)"
+
+      - name: Upload .vsix artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: elidia-agent-vscode
+          path: apps/vscode/*.vsix
+          if-no-files-found: error
+
+  upload-prod:
+    name: Upload .vsix to production (side-load fallback)
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download .vsix artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: elidia-agent-vscode
+          path: artifacts
+
+      - name: Normalize to stable -latest- filename
+        run: |
+          set -euo pipefail
+          VSIX=$(find artifacts -name '*.vsix' | head -1)
+          test -n "$VSIX" || { echo "::error::no .vsix in artifact"; exit 1; }
+          cp "$VSIX" elidia-agent-vscode-latest.vsix
+          ls -la elidia-agent-vscode-latest.vsix
+
+      - name: Upload to production via SCP
+        env:
+          PROD_DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "$PROD_DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            elidia-agent-vscode-latest.vsix \
+            "${PROD_USER}@${PROD_HOST}:/var/www/aiutils.io/frontend/public/downloads/"
+          # Same public/ + dist/ pairing as build-desktop.yml: public/ is the
+          # source, dist/ is what nginx serves — copy into both so the file is
+          # live immediately and survives the next frontend build.
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${PROD_USER}@${PROD_HOST}" \
+            'set -e
+             cd /var/www/aiutils.io/frontend
+             mkdir -p dist/downloads
+             cp -f public/downloads/elidia-agent-vscode-latest.vsix dist/downloads/
+             ls -la dist/downloads/elidia-agent-vscode-latest.vsix'
