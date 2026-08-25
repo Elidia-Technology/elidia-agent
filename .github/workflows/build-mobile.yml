@@ -29,11 +29,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Tauri's Android build keys off ANDROID_HOME; setup-android@v3 sets both,
-  # but pinning here makes the intent explicit and guards the license step.
-  ANDROID_HOME: ${{ github.workspace }}/android-sdk
-
 jobs:
   build-android:
     name: Android (apk + aab)
@@ -51,18 +46,13 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@00854ea68c109d98c75d956347303bf7c45b0277  # v3
         with:
-          # Tauri's generated Gradle project declares its own compileSdk/NDK;
-          # Gradle auto-installs any missing platform or NDK once licenses are
-          # accepted, so we install the common baseline and let Gradle fill in.
-          packages: |
-            platform-tools
-            platforms;android-34
-            build-tools;34.0.0
-
-      - name: Accept SDK licenses (lets Gradle auto-install the NDK)
-        run: |
-          set -euo pipefail
-          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          # `packages` is a single space-separated string (see the action's
+          # action.yml); a YAML block scalar embeds literal newlines and makes
+          # sdkmanager look for one bogus package. The action auto-accepts SDK
+          # licenses by default (accept-android-sdk-licenses: true), so Gradle
+          # can install the platform/NDK the Tauri template pins. We install a
+          # common baseline here and let Gradle fill in the rest.
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
       - name: Set up Rust (Android targets)
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
