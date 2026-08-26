@@ -20,6 +20,10 @@ let sessionId: string | null = null
 let output: vscode.OutputChannel
 let status: vscode.StatusBarItem
 let chatPanel: vscode.WebviewPanel | null = null
+// Captured at activation. openChatPanel needs it to build webview URIs for the
+// banner and avatar, and a webview cannot load anything from disk without a
+// localResourceRoots entry derived from it.
+let extensionUri: vscode.Uri
 
 function config() {
   return vscode.workspace.getConfiguration('elidia')
@@ -151,9 +155,23 @@ function openChatPanel(): vscode.WebviewPanel {
     'elidia.chat',
     'Elidia Agent',
     vscode.ViewColumn.Beside,
-    { enableScripts: true, retainContextWhenHidden: true }
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      // Without this the webview cannot load anything from disk, and the
+      // banner and avatar would silently render as broken images. Scoped to
+      // media/ so the extension exposes its own artwork and nothing else.
+      localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
+    }
   )
-  chatPanel.webview.html = renderChatHtml(chatPanel.webview.cspSource)
+  const mediaUri = (file: string) =>
+    chatPanel!.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', file)).toString()
+
+  chatPanel.webview.html = renderChatHtml(chatPanel.webview.cspSource, {
+    bannerLight: mediaUri('banner-light.png'),
+    bannerDark: mediaUri('banner-dark.png'),
+    mark: mediaUri('elidia-mark.png')
+  })
   chatPanel.webview.onDidReceiveMessage(async message => {
     if (message?.type === 'send' && typeof message.text === 'string' && message.text.trim()) {
       try {
@@ -192,6 +210,7 @@ async function ask(prompt: string, echo = true): Promise<void> {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  extensionUri = context.extensionUri
   output = vscode.window.createOutputChannel('Elidia Agent')
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
   status.command = 'elidia.chat'

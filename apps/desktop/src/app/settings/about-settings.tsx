@@ -1,8 +1,10 @@
 import { useStore } from '@nanostores/react'
 import { useEffect, useState } from 'react'
 
+import { useAccount } from '@/app/hooks/use-account'
+import { UserAvatar } from '@/components/chat/message-avatar'
 import { Button } from '@/components/ui/button'
-import { CheckCircle2, ExternalLink, Loader2, RefreshCw, Sparkles } from '@/lib/icons'
+import { CheckCircle2, ExternalLink, Loader2, RefreshCw, Sparkles, UserRound } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import {
   $desktopVersion,
@@ -40,8 +42,11 @@ function relativeTime(ms: number | undefined) {
   return `${Math.round(diff / 86_400_000)} days ago`
 }
 
+const ELIDIA_MARK = `${import.meta.env.BASE_URL}elidia-mark.png`
+
 export function AboutSettings() {
   const version = useStore($desktopVersion)
+  const { account, loading: accountLoading } = useAccount()
   const status = useStore($updateStatus)
   const apply = useStore($updateApply)
   const checking = useStore($updateChecking)
@@ -89,14 +94,54 @@ export function AboutSettings() {
   return (
     <SettingsContent>
       <div className="flex flex-col items-center gap-3 pt-6 pb-2 text-center">
-        <span className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-          <Sparkles className="size-8" />
+        {/* The real mark rather than a generic sparkle. The app ships the
+            artwork and this is the one place that identifies the product. */}
+        <span className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 p-2">
+          <img alt="" className="size-full object-contain" draggable={false} src={ELIDIA_MARK} />
         </span>
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Elidia Desktop</h2>
           <p className="mt-1 text-xs text-muted-foreground">
             {version?.appVersion ? `Version ${version.appVersion}` : 'Version unavailable'}
           </p>
+        </div>
+      </div>
+
+      <div className="mx-auto mt-4 w-full max-w-2xl">
+        <SectionHeading icon={UserRound} title="AiUtils account" />
+        <div className="rounded-lg border border-border/60">
+          {accountLoading ? (
+            <ListRow description="Checking…" title="Signed in as" />
+          ) : account ? (
+            <>
+              <div className="flex items-center gap-3 px-3 py-2.5">
+                <UserAvatar account={account} />
+                <div className="min-w-0">
+                  {/* A missing name is shown as missing, never as an empty
+                      line that reads like a rendering fault. */}
+                  <p className="truncate text-sm font-medium">
+                    {account.full_name || 'No name set'}
+                  </p>
+                  {account.email && (
+                    <p className="truncate text-xs text-muted-foreground">{account.email}</p>
+                  )}
+                </div>
+              </div>
+              {!account.full_name && (
+                <ListRow
+                  description="Not set — add one in your aiutils.io profile"
+                  title="Display name"
+                />
+              )}
+            </>
+          ) : (
+            // Running Elidia without an AiUtils account is supported, so this
+            // is a statement of fact rather than a problem to solve.
+            <ListRow
+              description="Add an AiUtils API key to use cloud models, storage and the vault"
+              title="Not connected"
+            />
+          )}
         </div>
       </div>
 

@@ -5,7 +5,14 @@
  * scripts only from the extension's own source. `cspSource` is supplied by VS
  * Code for the active webview.
  */
-export function renderChatHtml(cspSource: string): string {
+/** Webview URIs for the extension's own artwork, built by the caller. */
+export type ChatAssets = {
+  bannerLight: string
+  bannerDark: string
+  mark: string
+}
+
+export function renderChatHtml(cspSource: string, assets: ChatAssets): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -102,12 +109,35 @@ export function renderChatHtml(cspSource: string): string {
     padding: 0 14px 8px; font-size: 11px; color: var(--vscode-descriptionForeground);
     display: flex; justify-content: space-between;
   }
+  #empty .banner { width: min(78%, 320px); height: auto; margin: 0 auto 12px; display: block; user-select: none; }
+  /* Default to the light asset, then let the theme class decide. A webview
+     with no theme class still renders something legible. */
+  body.vscode-dark #empty .banner-light,
+  body.vscode-high-contrast #empty .banner-light { display: none; }
+  #empty .banner-dark { display: none; }
+  body.vscode-dark #empty .banner-dark,
+  body.vscode-high-contrast #empty .banner-dark { display: block; }
+  .turn .who { display: flex; align-items: center; gap: 6px; }
+  .turn .avatar {
+    width: 16px; height: 16px; flex: none; object-fit: contain; border-radius: 50%;
+  }
+  .turn .avatar-user {
+    display: grid; place-items: center; font-size: 8px; line-height: 1;
+    color: var(--vscode-descriptionForeground);
+  }
 </style>
 </head>
 <body>
   <div id="log">
     <div id="empty">
-      <h2>Elidia Agent</h2>
+      <!-- Two variants. The wordmark is near-black in one and near-white in
+           the other, so a single file is illegible against one of the two
+           grounds. VS Code puts vscode-light / vscode-dark / vscode-high-contrast
+           on <body>, which is the native signal and cannot disagree with the
+           theme the rest of the panel is using. Only the visible one carries
+           alt text — a screen reader should hear the name once. -->
+      <img class="banner banner-light" src="${assets.bannerLight}" alt="Elidia Agent">
+      <img class="banner banner-dark" src="${assets.bannerDark}" alt="" aria-hidden="true">
       <p>Ask about this workspace, or select code and use Explain or Fix from the right-click menu.</p>
       <div>
         <span class="hint">Explain this file</span>
@@ -123,6 +153,7 @@ export function renderChatHtml(cspSource: string): string {
     <button type="button" id="stop" title="Stop the current turn">Stop</button>
   </form>
 <script>
+  const ELIDIA_MARK = ${JSON.stringify(assets.mark)}
   const vscode = acquireVsCodeApi()
   const log = document.getElementById('log')
   const form = document.getElementById('composer')
@@ -137,10 +168,25 @@ export function renderChatHtml(cspSource: string): string {
     const turn = document.createElement('div')
     turn.className = 'turn ' + (kind || role)
     const label = document.createElement('div')
-    label.className = 'role'
-    const dot = document.createElement('span')
-    dot.className = 'dot'
-    label.append(dot, document.createTextNode(role))
+    label.className = 'role who'
+    // Built with DOM calls, not an HTML string: everything in this panel that
+    // touches model output stays on textContent/createElement so nothing can
+    // inject markup.
+    if (role === 'elidia') {
+      const mark = document.createElement('img')
+      mark.className = 'avatar'
+      mark.src = ELIDIA_MARK
+      mark.alt = ''
+      label.append(mark)
+    } else {
+      // A glyph: this panel has no identity for the person using the editor,
+      // and drawing a face for them would be an invention.
+      const glyph = document.createElement('span')
+      glyph.className = 'avatar avatar-user'
+      glyph.textContent = '\u25CF'
+      label.append(glyph)
+    }
+    label.append(document.createTextNode(role))
     const body = document.createElement('div')
     body.className = 'body'
     // textContent, never innerHTML: model output is untrusted and must not be
