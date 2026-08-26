@@ -114,13 +114,8 @@ jobs:
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             elidia-agent-vscode-latest.vsix \
             "${PROD_USER}@${PROD_HOST}:/var/www/aiutils.io/frontend/public/downloads/"
-          # Same public/ + dist/ pairing as build-desktop.yml: public/ is the
-          # source, dist/ is what nginx serves — copy into both so the file is
-          # live immediately and survives the next frontend build.
+          # public/downloads/ IS what nginx serves (aliased directly); there is
+          # no dist/downloads copy — heavy dirs are excluded from the build.
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             "${PROD_USER}@${PROD_HOST}" \
-            'set -e
-             cd /var/www/aiutils.io/frontend
-             mkdir -p dist/downloads
-             cp -f public/downloads/elidia-agent-vscode-latest.vsix dist/downloads/
-             ls -la dist/downloads/elidia-agent-vscode-latest.vsix'
+            'ls -la /var/www/aiutils.io/frontend/public/downloads/elidia-agent-vscode-latest.vsix'

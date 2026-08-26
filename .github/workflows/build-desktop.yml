@@ -286,22 +286,12 @@ jobs:
             artifacts/Elidia-Agent-latest-* \
             "${PROD_USER}@${PROD_HOST}:/var/www/aiutils.io/frontend/public/downloads/"
 
-          # public/ is Vite's SOURCE directory — it is copied into dist/ at
-          # build time, and nginx serves dist/. Uploading to public/ alone means
-          # the files sit on disk unserved until someone runs a frontend build,
-          # so this job reported success while users kept getting the previous
-          # release. Verified: an upload at 22:30 left the served files dated
-          # 19:05.
-          #
-          # Copy into dist/ as well so the release is live immediately, and keep
-          # the public/ copy so the next frontend build does not drop it.
+          # public/downloads/ IS what nginx serves (aliased directly via
+          # /downloads/). There is no dist/downloads copy — heavy dirs are
+          # excluded from the build, so an upload here is live immediately.
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             "${PROD_USER}@${PROD_HOST}" \
-            'set -e
-             cd /var/www/aiutils.io/frontend
-             mkdir -p dist/downloads
-             cp -f public/downloads/Elidia-Agent-latest-* dist/downloads/
-             ls -la dist/downloads/ | head -20'
+            'ls -la /var/www/aiutils.io/frontend/public/downloads/Elidia-Agent-latest-*'
 
       # Prove the release actually landed.
       #
@@ -327,8 +317,8 @@ jobs:
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             "${PROD_USER}@${PROD_HOST}" 'bash -s' <<'REMOTE'
           set -u
-          cd /var/www/aiutils.io/frontend/dist/downloads || {
-            echo "::error::dist/downloads does not exist — nginx has nothing to serve"
+          cd /var/www/aiutils.io/frontend/public/downloads || {
+            echo "::error::public/downloads does not exist — nginx has nothing to serve"
             exit 1
           }
           fail=0

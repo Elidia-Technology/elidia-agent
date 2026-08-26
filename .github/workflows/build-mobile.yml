@@ -68,6 +68,61 @@ jobs:
         working-directory: apps/mobile
         run: npx tauri android init
 
+      - name: Configure self-signed signing for release APK
+        working-directory: apps/mobile/src-tauri/gen/android
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          # keystore.properties is read by the release signingConfig added below.
+          # One password is used for both store and key (keytool -storepass/-keypass).
+          {
+            echo "keyAlias=${ANDROID_KEY_ALIAS}"
+            echo "password=${ANDROID_KEY_PASSWORD}"
+            echo "storeFile=${RUNNER_TEMP}/elidia-agent-upload.jks"
+          } > keystore.properties
+          base64 -d <<< "${ANDROID_KEY_BASE64}" > "${RUNNER_TEMP}/elidia-agent-upload.jks"
+          # Patch the generated app/build.gradle.kts so the release build is
+          # signed with the self-signed keystore (Play/Apple signing comes later).
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path('app/build.gradle.kts')
+          s = p.read_text()
+
+          assert "import java.util.Properties" in s, "Properties import missing"
+          s = s.replace("import java.util.Properties",
+                        "import java.util.Properties\nimport java.io.FileInputStream", 1)
+
+          signing = (
+              "    signingConfigs {\n"
+              "        create(\"release\") {\n"
+              "            val keystorePropertiesFile = rootProject.file(\"keystore.properties\")\n"
+              "            val keystoreProperties = Properties()\n"
+              "            if (keystorePropertiesFile.exists()) {\n"
+              "                keystoreProperties.load(FileInputStream(keystorePropertiesFile))\n"
+              "            }\n"
+              "            keyAlias = keystoreProperties[\"keyAlias\"] as String\n"
+              "            keyPassword = keystoreProperties[\"password\"] as String\n"
+              "            storeFile = file(keystoreProperties[\"storeFile\"] as String)\n"
+              "            storePassword = keystoreProperties[\"password\"] as String\n"
+              "            storeType = \"PKCS12\"\n"
+              "        }\n"
+              "    }\n"
+          )
+          marker = "    buildTypes {"
+          assert marker in s, "buildTypes marker missing"
+          s = s.replace(marker, signing + marker, 1)
+
+          rel = '        getByName("release") {'
+          assert rel in s, "release buildType missing"
+          s = s.replace(rel, rel + '\n            signingConfig = signingConfigs.getByName("release")', 1)
+
+          p.write_text(s)
+          print("patched app/build.gradle.kts for release signing")
+          PY
+
       - name: Build Android (apk + aab)
         working-directory: apps/mobile
         run: npx tauri android build
@@ -136,16 +191,11 @@ jobs:
             artifacts/Elidia-Agent-latest-android.apk \
             artifacts/Elidia-Agent-latest-android.aab \
             "${PROD_USER}@${PROD_HOST}:/var/www/aiutils.io/frontend/public/downloads/"
-          # public/ is the source, dist/ is what nginx serves — copy into both
-          # so the release is live immediately and survives the next build.
+          # public/downloads/ IS what nginx serves (aliased directly). There is
+          # no public/downloads copy — heavy dirs are excluded from the build.
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             "${PROD_USER}@${PROD_HOST}" \
-            'set -e
-             cd /var/www/aiutils.io/frontend
-             mkdir -p dist/downloads
-             cp -f public/downloads/Elidia-Agent-latest-android.apk dist/downloads/
-             cp -f public/downloads/Elidia-Agent-latest-android.aab dist/downloads/
-             ls -la dist/downloads/Elidia-Agent-latest-android.*'
+            'ls -la /var/www/aiutils.io/frontend/public/downloads/Elidia-Agent-latest-android.*'
 
       - name: Verify the release landed in the served directory
         env:
@@ -160,8 +210,8 @@ jobs:
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             "${PROD_USER}@${PROD_HOST}" 'bash -s' <<'REMOTE'
           set -u
-          cd /var/www/aiutils.io/frontend/dist/downloads || {
-            echo "::error::dist/downloads does not exist"
+          cd /var/www/aiutils.io/frontend/public/downloads || {
+            echo "::error::public/downloads does not exist"
             exit 1
           }
           fail=0

@@ -22,16 +22,26 @@ concurrency:
 
 jobs:
   deploy-vercel:
-    # Triggered automatically on release publish (production cuts) and
-    # manually via `gh workflow run deploy-site.yml` when an out-of-band
-    # main commit needs to ship live before the next release tag — e.g.
-    # a skills-index PR that doesn't touch website/** paths and so
-    # doesn't auto-deploy via the deploy-docs path.
+    # Optional out-of-band production push. The docs are served via GitHub
+    # Pages (deploy-docs below), so Vercel is NOT required for the docs to
+    # ship. If a Vercel project is connected (e.g. to serve aiutils.io/docs),
+    # set the VERCEL_DEPLOY_HOOK secret; until then this job is a no-op so a
+    # missing hook does not fail the workflow.
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Vercel Deploy
-        run: curl -X POST "${{ secrets.VERCEL_DEPLOY_HOOK }}"
+      - name: Trigger Vercel Deploy (no-op if hook unset)
+        env:
+          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "${VERCEL_DEPLOY_HOOK:-}" ]; then
+            echo "::warning::VERCEL_DEPLOY_HOOK secret is not set — skipping Vercel deploy."
+            echo "Docs ship via GitHub Pages (deploy-docs). To also deploy to Vercel:"
+            echo "Vercel -> Project -> Settings -> Git -> Deploy Hooks -> Create Hook,"
+            echo "then set its URL as the VERCEL_DEPLOY_HOOK Actions secret."
+            exit 0
+          fi
+          curl -X POST "${VERCEL_DEPLOY_HOOK}"
 
   deploy-docs:
     if: github.repository == 'Elidia-Technology/elidia-agent'
