@@ -41,7 +41,12 @@ jobs:
             echo "then set its URL as the VERCEL_DEPLOY_HOOK Actions secret."
             exit 0
           fi
-          curl -X POST "${VERCEL_DEPLOY_HOOK}"
+          # --fail makes curl exit non-zero on any 4xx/5xx so a rejected deploy
+          # fails the job instead of passing silently; --silent suppresses the
+          # progress bar and the hook URL is a secret that is never printed.
+          curl --fail --silent --show-error -X POST "${VERCEL_DEPLOY_HOOK}"
+          echo
+          echo "Vercel deploy hook accepted (HTTP 2xx)."
 
   deploy-docs:
     if: github.repository == 'Elidia-Technology/elidia-agent'
