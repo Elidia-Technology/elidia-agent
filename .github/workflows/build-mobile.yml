@@ -68,61 +68,6 @@ jobs:
         working-directory: apps/mobile
         run: npx tauri android init
 
-      - name: Configure self-signed signing for release APK
-        working-directory: apps/mobile/src-tauri/gen/android
-        env:
-          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          set -euo pipefail
-          # keystore.properties is read by the release signingConfig added below.
-          # One password is used for both store and key (keytool -storepass/-keypass).
-          {
-            echo "keyAlias=${ANDROID_KEY_ALIAS}"
-            echo "password=${ANDROID_KEY_PASSWORD}"
-            echo "storeFile=${RUNNER_TEMP}/elidia-agent-upload.jks"
-          } > keystore.properties
-          base64 -d <<< "${ANDROID_KEY_BASE64}" > "${RUNNER_TEMP}/elidia-agent-upload.jks"
-          # Patch the generated app/build.gradle.kts so the release build is
-          # signed with the self-signed keystore (Play/Apple signing comes later).
-          python3 - <<'PY'
-          import pathlib
-          p = pathlib.Path('app/build.gradle.kts')
-          s = p.read_text()
-
-          assert "import java.util.Properties" in s, "Properties import missing"
-          s = s.replace("import java.util.Properties",
-                        "import java.util.Properties\nimport java.io.FileInputStream", 1)
-
-          signing = (
-              "    signingConfigs {\n"
-              "        create(\"release\") {\n"
-              "            val keystorePropertiesFile = rootProject.file(\"keystore.properties\")\n"
-              "            val keystoreProperties = Properties()\n"
-              "            if (keystorePropertiesFile.exists()) {\n"
-              "                keystoreProperties.load(FileInputStream(keystorePropertiesFile))\n"
-              "            }\n"
-              "            keyAlias = keystoreProperties[\"keyAlias\"] as String\n"
-              "            keyPassword = keystoreProperties[\"password\"] as String\n"
-              "            storeFile = file(keystoreProperties[\"storeFile\"] as String)\n"
-              "            storePassword = keystoreProperties[\"password\"] as String\n"
-              "            storeType = \"PKCS12\"\n"
-              "        }\n"
-              "    }\n"
-          )
-          marker = "    buildTypes {"
-          assert marker in s, "buildTypes marker missing"
-          s = s.replace(marker, signing + marker, 1)
-
-          rel = '        getByName("release") {'
-          assert rel in s, "release buildType missing"
-          s = s.replace(rel, rel + '\n            signingConfig = signingConfigs.getByName("release")', 1)
-
-          p.write_text(s)
-          print("patched app/build.gradle.kts for release signing")
-          PY
-
       - name: Build Android (apk + aab)
         working-directory: apps/mobile
         run: npx tauri android build
@@ -139,6 +84,37 @@ jobs:
           cp "$APK" Elidia-Agent-latest-android.apk
           cp "$AAB" Elidia-Agent-latest-android.aab
           ls -la Elidia-Agent-latest-android.*
+
+      - name: Sign APK with self-signed keystore
+        working-directory: apps/mobile/src-tauri/gen/android/app/build/outputs
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          # Tauri's `assembleRelease` emits an UNSIGNED apk: the generated
+          # app/build.gradle.kts has no signingConfig on the release buildType,
+          # and Tauri rewrites that file from its build-time tauri.build.gradle.kts,
+          # so a gradle signingConfig patch is silently dropped. Sign the apk here
+          # with apksigner — the standard, verifiable Android signing tool — using
+          # the self-signed keystore (Play/Apple signing comes later).
+          ZIPALIGN=$(ls "$ANDROID_HOME"/build-tools/*/zipalign | tail -1)
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
+          test -n "$ZIPALIGN" || { echo "::error::zipalign not found in Android SDK build-tools"; exit 1; }
+          test -n "$APKSIGNER" || { echo "::error::apksigner not found in Android SDK build-tools"; exit 1; }
+          base64 -d <<< "${ANDROID_KEY_BASE64}" > "${RUNNER_TEMP}/elidia-agent-upload.jks"
+          "$ZIPALIGN" -f -p 4 Elidia-Agent-latest-android.apk aligned.apk
+          "$APKSIGNER" sign \
+            --ks "${RUNNER_TEMP}/elidia-agent-upload.jks" \
+            --ks-pass "pass:${ANDROID_KEY_PASSWORD}" \
+            --ks-key-alias "${ANDROID_KEY_ALIAS}" \
+            --key-pass "pass:${ANDROID_KEY_PASSWORD}" \
+            --out Elidia-Agent-latest-android.apk \
+            aligned.apk
+          rm -f aligned.apk
+          echo "=== authoritative signature verification ==="
+          "$APKSIGNER" verify --print-certs Elidia-Agent-latest-android.apk
 
       - name: Verify artifacts are real installers
         run: |
@@ -192,7 +168,7 @@ jobs:
             artifacts/Elidia-Agent-latest-android.aab \
             "${PROD_USER}@${PROD_HOST}:/var/www/aiutils.io/frontend/public/downloads/"
           # public/downloads/ IS what nginx serves (aliased directly). There is
-          # no public/downloads copy — heavy dirs are excluded from the build.
+          # no dist/downloads copy — heavy dirs are excluded from the build.
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             "${PROD_USER}@${PROD_HOST}" \
             'ls -la /var/www/aiutils.io/frontend/public/downloads/Elidia-Agent-latest-android.*'
