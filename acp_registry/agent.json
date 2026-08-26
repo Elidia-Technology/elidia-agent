@@ -1,7 +1,7 @@
 {
   "id": "elidia-agent",
   "name": "Elidia Agent",
-  "version": "2.0.10",
+  "version": "2.1.0",
   "description": "Multi-platform AI agent with ACP editor integration, persistent memory, skills, and rich tool support.",
   "repository": "https://github.com/Elidia-Technology/elidia-agent",
   "website": "https://aiutils.io/elidia",
@@ -9,7 +9,7 @@
   "license": "MIT",
   "distribution": {
     "uvx": {
-      "package": "elidia-agent-cli[acp]==2.0.10",
+      "package": "elidia-agent-cli[acp]==2.1.0",
       "args": ["elidia-acp"]
     }
   }

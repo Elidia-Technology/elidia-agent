@@ -1,6 +1,6 @@
 [package]
 name = "elidia-agent-mobile"
-version = "2.0.10"
+version = "2.1.0"
 description = "Elidia Agent for Android and iOS"
 authors = ["Elidia Technology Pvt Ltd"]
 edition = "2021"

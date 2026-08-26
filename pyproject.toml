@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "elidia-agent-cli"
-version = "2.0.10"
+version = "2.1.0"
 description = "Multi-platform AI agent for the terminal and messaging apps — part of the AiUtils.io ecosystem, powered by Elidia Technology"
 readme = "README.md"
 # Upper bound is load-bearing, not cosmetic. uv resolves the project's

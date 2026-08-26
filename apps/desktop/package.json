@@ -2,7 +2,7 @@
   "name": "elidia",
   "productName": "Elidia Agent",
   "private": true,
-  "version": "2.0.10",
+  "version": "2.1.0",
   "description": "Native desktop shell for Elidia Agent.",
   "author": "AiUtils",
   "homepage": "https://aiutils.io",

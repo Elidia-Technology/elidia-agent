@@ -2,7 +2,7 @@
   "name": "elidia-agent-vscode",
   "displayName": "Elidia Agent",
   "description": "Elidia Agent in VS Code \u2014 chat, explain and fix against your own Elidia backend.",
-  "version": "2.0.10",
+  "version": "2.1.0",
   "publisher": "ElidiaTechnology",
   "license": "MIT",
   "icon": "media/icon.png",
