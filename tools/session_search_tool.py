@@ -399,10 +399,10 @@ def session_search(
     """
     if db is None:
         try:
-            from elidia_state import SessionDB
-            db = SessionDB()
+            from store.factory import create_session_store
+            db = create_session_store()
         except Exception:
-            logging.debug("SessionDB unavailable for session_search", exc_info=True)
+            logging.debug("Session store unavailable for session_search", exc_info=True)
             from elidia_state import format_session_db_unavailable
             return tool_error(format_session_db_unavailable(), success=False)
 
@@ -453,8 +453,8 @@ def session_search(
 def check_session_search_requirements() -> bool:
     """Requires the SQLite state database."""
     try:
-        from elidia_state import DEFAULT_DB_PATH
-        return DEFAULT_DB_PATH.parent.exists()
+        from elidia_state import _default_db_path
+        return _default_db_path().parent.exists()
     except ImportError:
         return False
 

@@ -358,14 +358,12 @@ class TestHistoryDisplay:
         cli._session_db.create_session("target_session", "cli")
         cli._session_db.append_message("target_session", "user", "hello from resumed session")
 
-        os.environ["ELIDIA_SESSION_ID"] = "current_session"
         _VAR_MAP["ELIDIA_SESSION_ID"].set("current_session")
 
         try:
             cli._handle_resume_command("/resume target_session")
 
             assert cli.session_id == "target_session"
-            assert os.environ["ELIDIA_SESSION_ID"] == "target_session"
             assert get_session_env("ELIDIA_SESSION_ID") == "target_session"
         finally:
             cli._session_db.close()

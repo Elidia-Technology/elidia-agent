@@ -84,17 +84,18 @@ _VAR_MAP = {
 
 
 def set_current_session_id(session_id: str) -> None:
-    """Synchronize ``ELIDIA_SESSION_ID`` across ContextVar and ``os.environ``.
+    """Set ``ELIDIA_SESSION_ID`` in the task-local ContextVar.
 
-    Long-lived single-process entrypoints like the CLI can rotate sessions via
-    ``/new``, ``/resume``, ``/branch``, or compression splits without
-    reconstructing the entire agent. Tools still consult
-    ``get_session_env("ELIDIA_SESSION_ID")`` with an ``os.environ`` fallback,
-    so both storage paths must move together when the active session changes.
+    Callers that need ``os.environ`` fallback for CLI/cron compatibility
+    (where ``set_session_vars`` is never called) should set ``os.environ``
+    themselves — ``get_session_env("ELIDIA_SESSION_ID")`` checks the
+    ContextVar first and only falls back to ``os.environ`` when the var
+    was never set in the current context.
+
+    The previous implementation also wrote ``os.environ``, which is
+    process-global and unsafe in the pooled multi-tenant runtime
+    (AIUT-3078 B1).
     """
-    import os
-
-    os.environ["ELIDIA_SESSION_ID"] = session_id
     _SESSION_ID.set(session_id)
 
 

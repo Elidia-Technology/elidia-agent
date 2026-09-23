@@ -151,11 +151,11 @@ def _find_session_id(
 
 
 def _append_to_sqlite(session_id: str, message: dict) -> None:
-    """Append a message to the SQLite session database."""
+    """Append a message to the session database."""
     db = None
     try:
-        from elidia_state import SessionDB
-        db = SessionDB()
+        from store.factory import create_session_store
+        db = create_session_store()
         db.append_message(
             session_id=session_id,
             role=message.get("role", "assistant"),

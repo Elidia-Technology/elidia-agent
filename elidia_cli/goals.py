@@ -217,20 +217,20 @@ def _get_session_db() -> Optional[Any]:
     """
     try:
         from elidia_constants import get_elidia_home
-        from elidia_state import SessionDB
+        from store.factory import create_session_store
 
         home = str(get_elidia_home())
     except Exception as exc:  # pragma: no cover
-        logger.debug("GoalManager: SessionDB bootstrap failed (%s)", exc)
+        logger.debug("GoalManager: session store bootstrap failed (%s)", exc)
         return None
 
     cached = _DB_CACHE.get(home)
     if cached is not None:
         return cached
     try:
-        db = SessionDB()
+        db = create_session_store()
     except Exception as exc:  # pragma: no cover
-        logger.debug("GoalManager: SessionDB() raised (%s)", exc)
+        logger.debug("GoalManager: create_session_store() raised (%s)", exc)
         return None
     _DB_CACHE[home] = db
     return db

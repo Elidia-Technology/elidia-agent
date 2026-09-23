@@ -439,6 +439,14 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         api_key_env_vars=("AZURE_FOUNDRY_API_KEY",),
         base_url_env_var="AZURE_FOUNDRY_BASE_URL",
     ),
+    "portal": ProviderConfig(
+        id="portal",
+        name="AiUtils Portal (credit-billed)",
+        auth_type="api_key",
+        inference_base_url="http://127.0.0.1:8000/agent-v2/v1",
+        api_key_env_vars=("GATEWAY_INTERNAL_TOKEN",),
+        base_url_env_var="PORTAL_MODEL_API_URL",
+    ),
 }
 
 # Auto-extend PROVIDER_REGISTRY with any api-key provider registered in
@@ -1509,6 +1517,14 @@ def resolve_provider(
         "go": "opencode-go", "opencode-go-sub": "opencode-go",
         "kilo": "kilocode", "kilo-code": "kilocode", "kilo-gateway": "kilocode",
         "lmstudio": "lmstudio", "lm-studio": "lmstudio", "lm_studio": "lmstudio",
+        # "elidia" historically named the Elidia Portal OAuth device-code provider
+        # (inference-api.aiutils.io). That endpoint no longer resolves and the
+        # portal now issues Developer API keys, so "elidia" resolves to the
+        # "aiutils" API-key provider (developer-api.aiutils.io) and authenticates
+        # with an ak-dev-* key rather than OAuth. "elidia-portal" is mapped here
+        # too so the elidia plugin's own alias can't route it back to the OAuth
+        # provider.
+        "elidia": "aiutils", "elidia-portal": "aiutils",
         # Local server aliases — route through the generic custom provider
         "ollama": "custom", "ollama_cloud": "ollama-cloud",
         "vllm": "custom", "llamacpp": "custom",
@@ -1551,6 +1567,9 @@ def resolve_provider(
     try:
         auth_store = _load_auth_store()
         active = auth_store.get("active_provider")
+        # Normalize legacy provider names — a persisted "elidia" OAuth session
+        # now resolves to the "aiutils" API-key provider.
+        active = _PROVIDER_ALIASES.get(active, active) if active else active
         if active and active in PROVIDER_REGISTRY:
             status = get_auth_status(active)
             if status.get("logged_in"):

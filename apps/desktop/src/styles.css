@@ -8,9 +8,57 @@
 @font-face {
   font-family: 'Collapse';
   font-style: normal;
+  font-weight: 100;
+  font-display: swap;
+  src: url('../../../node_modules/@aiutils/ui/dist/fonts/Collapse-Thin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Collapse';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('../../../node_modules/@aiutils/ui/dist/fonts/Collapse-Light.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Collapse';
+  font-style: italic;
+  font-weight: 300;
+  font-display: swap;
+  src: url('../../../node_modules/@aiutils/ui/dist/fonts/Collapse-LightItalic.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Collapse';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../../../node_modules/@aiutils/ui/dist/fonts/Collapse-Regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Collapse';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../../../node_modules/@aiutils/ui/dist/fonts/Collapse-Italic.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Collapse';
+  font-style: normal;
   font-weight: 700;
   font-display: swap;
   src: url('../../../node_modules/@aiutils/ui/dist/fonts/Collapse-Bold.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Collapse';
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../../../node_modules/@aiutils/ui/dist/fonts/Collapse-BoldItalic.woff2') format('woff2');
 }
 
 @theme inline {
@@ -262,7 +310,7 @@
     --dt-user-bubble: var(--ui-chat-bubble-background);
     --dt-user-bubble-border: var(--ui-stroke-tertiary);
 
-    --dt-font-sans: 'Segoe WPC', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+    --dt-font-sans: 'Collapse', 'Segoe WPC', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
     --dt-font-mono: 'Cascadia Code', 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
     --dt-base-size: 1rem;
     --dt-line-height: 1.5;

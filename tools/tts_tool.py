@@ -2532,6 +2532,20 @@ TTS_SCHEMA = {
             "output_path": {
                 "type": "string",
                 "description": f"Optional custom file path to save the audio. Defaults to {display_elidia_home()}/audio_cache/<timestamp>.mp3"
+            },
+            "audio_type": {
+                "type": "string",
+                "enum": ["speech", "music", "sound_effect"],
+                "description": "Type of audio to generate (speech, music, or sound effect). Used by the portal media backend; ignored by local TTS providers.",
+            },
+            "quality": {
+                "type": "string",
+                "enum": ["economy", "standard", "premium"],
+                "description": "Quality tier when no explicit model is chosen. Ignored when `model` is set.",
+            },
+            "model": {
+                "type": "string",
+                "description": "Explicit model endpoint_id from the `list_media_models` tool. Omit to let the portal auto-pick by quality tier.",
             }
         },
         "required": ["text"]

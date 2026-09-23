@@ -906,6 +906,27 @@ IMAGE_GENERATE_SCHEMA = {
                 "description": "The aspect ratio of the generated image. 'landscape' is 16:9 wide, 'portrait' is 16:9 tall, 'square' is 1:1.",
                 "default": DEFAULT_ASPECT_RATIO,
             },
+            "quality": {
+                "type": "string",
+                "enum": ["economy", "standard", "premium"],
+                "description": "Quality tier when no explicit model is chosen (economy = fast/cheap, standard = balanced, premium = highest quality). Ignored when `model` is set.",
+            },
+            "model": {
+                "type": "string",
+                "description": "Explicit model endpoint_id from the `list_media_models` tool. Omit to let the portal auto-pick by quality tier.",
+            },
+            "num_images": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4,
+                "default": 1,
+                "description": (
+                    "How many images to generate in one call (1-4). Use more than 1 "
+                    "only when the user asks for variations or several options; each "
+                    "image is charged separately. Some models produce fewer than "
+                    "requested, in which case the result says how many were made."
+                ),
+            },
         },
         "required": ["prompt"],
     },

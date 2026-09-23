@@ -5,7 +5,7 @@ version: 1.0.0
 author: Elidia Agent
 license: MIT
 prerequisites:
-  tools: [research_state, research_gate, research_personas, research_deck]
+  tools: [research_state, research_gate, research_personas, research_deck, research_sources]
 platforms: [linux, macos, windows]
 metadata:
   elidia:
@@ -221,6 +221,13 @@ You may **close** a gap, or restate one still open. You may **not** invent a new
 An interesting tangent can become a claim bound to no sub-question, and it will be visible
 as exactly that — but the objective does not grow to accommodate it.
 
+**Call the gate after every round** — not after every tool call, and not only when you
+think you are ready. The rhythm is: GATHER → READ → REFLECT → gate → (loop or stop).
+Do not call `research_sources` eight times before recording any claims. The pattern that
+wastes budget is: search, search, search, search without ever extracting claims or
+checking the gate. After each GATHER pass, READ the results into claims, REFLECT on
+gaps, advance the round, and consult the gate before deciding whether to gather more.
+
 ---
 
 ## The gate
@@ -233,7 +240,7 @@ Three outcomes:
 
 | Verdict | Do |
 |---|---|
-| **sufficient** | proceed to CROSS-CHECK |
+| **sufficient** | proceed to CROSS-CHECK, then SYNTHESIZE immediately — do not gather more |
 | **insufficient, budget remains** | loop again — close the gaps it names |
 | **insufficient, budget spent** | stop, synthesize what you have, **state the unmet criteria as limitations** |
 
@@ -241,6 +248,10 @@ The floor: ≥5 claims, ≥3 unique sources, ≥30% high-confidence, no open gap
 
 **If you believe the evidence is adequate and the gate disagrees, the gate is right.**
 Judging your own coverage from inside the loop is the failure mode it exists to catch.
+
+**When the gate says sufficient, stop gathering and produce the deck.** Do not "do one
+more round for completeness" — that is the opposite of what the gate just told you.
+Proceed directly to CROSS-CHECK (if contested claims exist) and then SYNTHESIZE.
 
 The third outcome is not a failure. A run that hit its budget and says so, with limits
 named, is honest work. A run that pretends is not.
@@ -381,7 +392,8 @@ research_state(action="finish", run_id=...)
 ### The deck
 
 For anything the user will keep, share or print, produce a **single-page self-contained
-HTML report**.
+HTML report** — a premium-quality document that looks like a professional analytics
+dashboard, not a plain text dump.
 
 Get the numbers first:
 
@@ -389,10 +401,17 @@ Get the numbers first:
 research_deck(run_id=...)
 ```
 
-That returns analytics computed from what you actually recorded — confidence mix, source
-distribution grouped by origin, coverage per sub-question, contested points and their
-resolutions, ranked candidates, claims per round — plus the mode's output contract, an
-assembled limitations list, and the constraints the file must satisfy.
+That returns:
+- **analytics** — confidence mix, source distribution, coverage per sub-question,
+  confidence progression by round, claims grouped by sub-question, citation index,
+  contested points and resolutions, ranked candidates, claims per round
+- **chart_recommendations** — which Chart.js charts to render and what data they use
+- **design_guidance** — the visual contract for the HTML file
+- **citation_index** — numbered source list for inline `[N]` citations
+- **claims_by_sub_question** — structured claims grouped for rendering
+- **output_contract** — mode-specific required sections
+- **limitations** — assembled from unmet gate criteria, open gaps, unresolved contradictions
+- **constraints** — the rules the file must satisfy
 
 Use those numbers. Do not describe your own confidence in prose: *"4 of 11 claims are high
 confidence, from 3 sources, and sub-question 2 has none"* is checkable; "the evidence is
@@ -403,10 +422,54 @@ should not invent one — a regulatory-exposure investigation and a molecular-di
 warrant different sections and different charts. A single mould forced over both is what
 makes reports look generated.
 
+But "no template" does not mean "no design". Read the `design_guidance` from the response
+and follow it. The deck is a complete `<!DOCTYPE html>` document with:
+
+**Document structure:**
+- `<head>` with charset, viewport, `<style>` with all CSS inline
+- Chart.js loaded from CDN: `<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>`
+- All chart data embedded inline as JSON, all JS inline in `<script>` at the bottom
+
+**Visual sections (adapt order and presence to the mode):**
+1. **Header** — gradient banner with research question, persona lens, mode, date
+2. **Executive KPI Dashboard** — 4–6 metric cards: total claims, unique sources,
+   high-confidence ratio, coverage score, rounds completed, contested count
+3. **Findings by Sub-Question** — each sub-question as a card. Inside: every claim with
+   its confidence badge (high=green pill, medium=amber, low=red) and inline source
+   citation `[N]`. Show the claim text, not just a summary.
+4. **Data Visualisation** — Chart.js charts derived from analytics. Use the
+   `chart_recommendations` to decide which charts this run warrants:
+   - Confidence mix → doughnut chart (high/medium/low)
+   - Source distribution → horizontal bar chart (claims per origin)
+   - Coverage per sub-question → grouped bar (claims vs high-confidence)
+   - Claims by round → line chart (evidence accumulation)
+   - Confidence by round → overlaid line (quality progression)
+   - Candidate ranking → horizontal bar (discovery mode)
+5. **Contested Claims & Resolutions** — if any claims are contested, show each with its
+   resolution assessment or mark it unresolved
+6. **Mode-specific section** — candidates table (discovery), position comparison
+   (simulation), options matrix (planning), dated evidence + falsifier (market)
+7. **Limitations** — always a full section, never a footnote. Populated from `limitations`.
+8. **References / Citation Index** — numbered list from `citation_index`, each showing
+   source URL/identifier and its origin label
+
+**Visual design (from design_guidance):**
+- Modern card-based layout with subtle box-shadows and rounded corners
+- System font stack: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif
+- Section cards with coloured left borders matching the domain accent
+- Responsive: works 360px to 1920px. Wide tables in `overflow-x:auto` containers.
+- Dark-mode via `prefers-color-scheme` and `data-theme`
+- Print CSS: `@media print` with page breaks, scaled charts, no clipping
+
+**Citation format:**
+- Inline: `[N]` after the claim, linking to the references section
+- References: numbered list from `citation_index`
+- Every claim must show its source — this is non-negotiable
+
 The constraints come back from the tool. The short version: one self-contained file that
-renders with **no network**, every claim showing its source and confidence, charts that
-answer *"how solid is this?"*, **limitations as a section** rather than a footnote, and
-print CSS that survives a PDF export.
+renders with **no network** (except Chart.js CDN), every claim showing its source and
+confidence, charts that answer *"how solid is this?"*, **limitations as a section** rather
+than a footnote, and print CSS that survives a PDF export.
 
 ### Saving it
 

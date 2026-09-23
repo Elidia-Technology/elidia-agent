@@ -37,16 +37,58 @@ const STAGE_ROOT = path.join(APP_ROOT, 'build', 'native-deps')
 
 // The target arch may be overridden by electron-builder via npm_config_arch
 // (e.g. `npm run dist -- --arm64`); fall back to the build host's arch.
-const TARGET_ARCH = process.env.npm_config_arch || process.arch
 const TARGET_PLATFORM = process.platform
+
+// Which architectures to stage prebuilds for.
+//
+// This used to be a single arch: `process.env.npm_config_arch || process.arch`.
+// process.arch is the BUILD MACHINE's architecture, and `npm run build` runs
+// ONCE before `electron-builder --mac --x64 --arm64` packages both dmgs from
+// the same staged tree. CI builds macOS on macos-14 (Apple Silicon), so both
+// installers shipped darwin-arm64 prebuilds — and the x64 app died with
+// "PTY support is unavailable" because an x86_64 Electron cannot load an arm64
+// .node. Reported from a shipped build on an Intel Mac, 2026-08-24.
+//
+// node-pty resolves prebuilds/${platform}-${arch} at RUNTIME, so staging every
+// arch we have for this platform lets each packaged app pick its own. The cost
+// is one extra pty.node + spawn-helper (tens of KB); the alternative is half
+// the users having no terminal.
+//
+// An explicit npm_config_arch still wins, for a deliberate single-arch build.
+function resolveTargetArches(sourceDir) {
+  const explicit = process.env.npm_config_arch
+  if (explicit) return [explicit]
+
+  const prebuildsDir = path.join(sourceDir, 'prebuilds')
+  let entries = []
+  try {
+    entries = fs.readdirSync(prebuildsDir, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .map(e => e.name)
+  } catch {
+    return [process.arch]
+  }
+
+  const prefix = `${TARGET_PLATFORM}-`
+  const arches = entries
+    .filter(name => name.startsWith(prefix))
+    .map(name => name.slice(prefix.length))
+
+  // Never ship nothing: if discovery finds no match, fall back to the build
+  // host's arch so the failure is a missing second arch, not a missing module.
+  return arches.length ? arches : [process.arch]
+}
 
 // Modules to stage. The "from" path is the hoisted location in the workspace
 // root; "to" is the layout we want inside build/native-deps/.  The "include"
 // globs (relative to "from") select the runtime-essential files.  Anything
 // outside the include list is left behind (source, deps/, scripts/, etc.).
+const NODE_PTY_SRC = path.join(REPO_ROOT, 'node_modules', 'node-pty')
+const TARGET_ARCHES = resolveTargetArches(NODE_PTY_SRC)
+
 const NATIVE_DEPS = [
   {
-    from: path.join(REPO_ROOT, 'node_modules', 'node-pty'),
+    from: NODE_PTY_SRC,
     to: path.join(STAGE_ROOT, 'node-pty'),
     include: [
       'package.json',
@@ -57,11 +99,13 @@ const NATIVE_DEPS = [
       // ~25 MB of .pdb debug symbols that prebuild-install bundles for
       // Windows crash analysis -- not used at runtime, would just bloat
       // the installer.
-      `prebuilds/${TARGET_PLATFORM}-${TARGET_ARCH}/*.node`,
-      `prebuilds/${TARGET_PLATFORM}-${TARGET_ARCH}/*.dll`,
-      `prebuilds/${TARGET_PLATFORM}-${TARGET_ARCH}/*.exe`,
-      `prebuilds/${TARGET_PLATFORM}-${TARGET_ARCH}/spawn-helper`,
-      `prebuilds/${TARGET_PLATFORM}-${TARGET_ARCH}/conpty/*`
+      ...TARGET_ARCHES.flatMap(arch => [
+        `prebuilds/${TARGET_PLATFORM}-${arch}/*.node`,
+        `prebuilds/${TARGET_PLATFORM}-${arch}/*.dll`,
+        `prebuilds/${TARGET_PLATFORM}-${arch}/*.exe`,
+        `prebuilds/${TARGET_PLATFORM}-${arch}/spawn-helper`,
+        `prebuilds/${TARGET_PLATFORM}-${arch}/conpty/*`
+      ])
     ]
   }
 ]

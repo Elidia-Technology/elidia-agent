@@ -234,11 +234,11 @@ def _create_session_db_for_oneshot():
     advertised but every call returns "Session database not available.".
     """
     try:
-        from elidia_state import SessionDB
+        from store.factory import create_session_store
 
-        return SessionDB()
+        return create_session_store()
     except Exception as exc:
-        logging.debug("SQLite session store not available for oneshot mode: %s", exc)
+        logging.debug("Session store not available for oneshot mode: %s", exc)
         return None
 
 

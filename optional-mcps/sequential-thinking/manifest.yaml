@@ -1,0 +1,30 @@
+# Elidia-approved MCP catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: sequential-thinking
+description: Structured multi-step reasoning for complex, multi-part requests.
+source: https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking
+
+# No network calls, no credentials, no state. That matters in the hosted
+# portal, where MCP connections and secrets are process-global and shared by
+# every user (tools/mcp_tool.py keeps _servers module-level); a server with no
+# user data cannot leak one user's data to another.
+transport:
+  type: stdio
+  command: npx
+  args:
+    - "-y"
+    - "@modelcontextprotocol/server-sequential-thinking"
+
+
+# Production pins pre-installed binaries instead of the one-shot launcher
+# above, so a server start does not depend on a registry fetch. See the
+# mcp_servers block in the deployed config.yaml.
+auth:
+  type: none
+
+tools:
+  # 1 tool: sequentialthinking
+  resources: false
+  prompts: false

@@ -687,6 +687,23 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
 
 
 
+def _portal_proxy_result(function_name: str, function_args: dict) -> Optional[str]:
+    """Return the portal-proxied result for a media tool, or None.
+
+    In portal provider mode, media-generation tools (image_generate,
+    video_generate, text_to_speech, generate_3d) must run through the portal's
+    tool-execution endpoint so the user's portal credits are charged — never the
+    native FAL handler, which has no FAL key on the hosted gateway. Returns None
+    when the tool isn't proxied, the gateway isn't in portal mode, or the proxy
+    declined to handle it; the caller then falls through to local dispatch.
+    """
+    try:
+        from tools.portal_tool_proxy import maybe_proxy_tool
+        return maybe_proxy_tool(function_name, function_args)
+    except Exception:
+        return None
+
+
 def execute_tool_calls_sequential(agent, assistant_message, messages: list, effective_task_id: str, api_call_count: int = 0) -> None:
     """Execute tool calls sequentially (original behavior). Used for single calls or interactive tools."""
     for i, tool_call in enumerate(assistant_message.tool_calls, 1):
@@ -839,7 +856,23 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
 
         tool_start_time = time.time()
 
-        if _block_msg is not None:
+        # Portal tool proxy (portal provider mode): media-generation tools
+        # (image_generate / video_generate / text_to_speech / generate_3d)
+        # must execute through the portal's tool-execution endpoint so the
+        # user's portal credits are charged — never the native FAL handler,
+        # which has no FAL key on the hosted gateway. The CONCURRENT path
+        # routes these via agent._invoke_tool → invoke_tool → maybe_proxy_tool;
+        # this SEQUENTIAL path calls handle_function_call directly, so it must
+        # consult the proxy here (AIUT-3283). A non-None result is used
+        # verbatim and the normal dispatch chain is skipped.
+        _proxied_result: Optional[str] = None
+        if not _execution_blocked:
+            _proxied_result = _portal_proxy_result(function_name, function_args)
+
+        if _proxied_result is not None:
+            function_result = _proxied_result
+            tool_duration = time.time() - tool_start_time
+        elif _block_msg is not None:
             # Tool blocked by plugin policy — return error without executing.
             function_result = json.dumps({"error": _block_msg}, ensure_ascii=False)
             tool_duration = 0.0

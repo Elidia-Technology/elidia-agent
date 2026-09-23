@@ -1995,10 +1995,11 @@ class GatewayRunner:
             logger.debug("approvals.mode startup check skipped", exc_info=True)
 
         # Initialize session database for session_search tool support
+        # (uses the store factory so the backend follows ELIDIA_STORE_BACKEND).
         self._session_db = None
         try:
-            from elidia_state import SessionDB
-            self._session_db = SessionDB()
+            from store.factory import create_session_store
+            self._session_db = create_session_store()
         except Exception as e:
             # WARNING (not DEBUG) so the failure appears in errors.log — matches
             # cli.py's handling of the same init path.  Users hitting NFS-mounted
@@ -2006,7 +2007,7 @@ class GatewayRunner:
             # session search without this.  The underlying cause (usually
             # "locking protocol" from NFS) is now also captured by
             # elidia_state.get_last_init_error() for slash-command error strings.
-            logger.warning("SQLite session store not available: %s", e)
+            logger.warning("Session store not available: %s", e)
 
         # Opportunistic state.db maintenance: prune ended sessions older
         # than sessions.retention_days + optional VACUUM. Tracks last-run
@@ -10047,9 +10048,9 @@ class GatewayRunner:
         _title_arg = event.get_command_args().strip()
         _title_note = ""
         if _title_arg and self._session_db and new_entry:
-            from elidia_state import SessionDB
+            from store.base import sanitize_title as _sanitize_title_fn
             try:
-                sanitized = SessionDB.sanitize_title(_title_arg)
+                sanitized = _sanitize_title_fn(_title_arg)
             except ValueError as e:
                 sanitized = None
                 _title_note = t("gateway.reset.title_rejected", error=str(e))
@@ -14135,13 +14136,13 @@ class GatewayRunner:
                     i += 1
 
         try:
-            from elidia_state import SessionDB
+            from store.factory import create_session_store
             from agent.insights import InsightsEngine
 
             loop = asyncio.get_running_loop()
 
             def _run_insights():
-                db = SessionDB()
+                db = create_session_store()
                 engine = InsightsEngine(db)
                 report = engine.generate(days=days, source=source)
                 result = engine.format_gateway(report)

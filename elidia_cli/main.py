@@ -986,9 +986,9 @@ def _resolve_last_session(source: str = "cli") -> Optional[str]:
     """Look up the most recently-used session ID for a source."""
     db = None
     try:
-        from elidia_state import SessionDB
+        from store.factory import create_session_store
 
-        db = SessionDB()
+        db = create_session_store()
         sessions = db.search_sessions(source=source, limit=1)
         return sessions[0]["id"] if sessions else None
     except Exception:
@@ -1125,9 +1125,9 @@ def _resolve_session_by_name_or_id(name_or_id: str) -> Optional[str]:
       resumed at the live tip instead of a stale parent with no messages.
     """
     try:
-        from elidia_state import SessionDB
+        from store.factory import create_session_store
 
-        db = SessionDB()
+        db = create_session_store()
 
         # Try as exact session ID first
         session = db.get_session(name_or_id)
@@ -1178,9 +1178,9 @@ def _print_tui_exit_summary(
 
     db = None
     try:
-        from elidia_state import SessionDB
+        from store.factory import create_session_store
 
-        db = SessionDB()
+        db = create_session_store()
         session = db.get_session(target)
         if not session:
             return
@@ -14596,11 +14596,11 @@ Examples:
         import json as _json
 
         try:
-            from elidia_state import SessionDB
+            from store.factory import create_session_store
 
-            db = SessionDB()
+            db = create_session_store()
         except Exception as e:
-            print(f"Error: Could not open session database: {e}")
+            print(f"Error: Could not open session store: {e}")
             return
 
         action = args.sessions_action
@@ -14804,10 +14804,10 @@ Examples:
 
     def cmd_insights(args):
         try:
-            from elidia_state import SessionDB
+            from store.factory import create_session_store
             from agent.insights import InsightsEngine
 
-            db = SessionDB()
+            db = create_session_store()
             engine = InsightsEngine(db)
             report = engine.generate(days=args.days, source=args.source)
             print(engine.format_terminal(report))

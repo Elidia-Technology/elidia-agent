@@ -1,0 +1,5 @@
+name: gpu-api-provider
+kind: model-provider
+version: 1.0.0
+description: AiUtils GPU API (OpenAI-compatible LLM/vision/embeddings/audio/image via gpuapi_ keys)
+author: AiUtils.io

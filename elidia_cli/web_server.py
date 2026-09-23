@@ -742,8 +742,8 @@ async def get_status():
 
     active_sessions = 0
     try:
-        from elidia_state import SessionDB
-        db = SessionDB()
+        from store.factory import create_session_store
+        db = create_session_store()
         try:
             sessions = db.list_sessions_rich(limit=50)
             now = time.time()
@@ -1543,8 +1543,8 @@ async def get_sessions(
             detail="order must be one of: created, recent",
         )
     try:
-        from elidia_state import SessionDB
-        db = SessionDB()
+        from store.factory import create_session_store
+        db = create_session_store()
         try:
             min_message_count = max(0, min_messages)
             archived_only = archived == "only"
@@ -1592,8 +1592,8 @@ async def search_sessions(q: str = "", limit: int = 20):
     if not q or not q.strip():
         return {"results": []}
     try:
-        from elidia_state import SessionDB
-        db = SessionDB()
+        from store.factory import create_session_store
+        db = create_session_store()
         try:
             # Auto-add prefix wildcards so partial words match
             # e.g. "nimb" → "nimb*" matches "nimby"
@@ -4393,7 +4393,7 @@ def _session_latest_descendant(session_id: str):
     /model may create child sessions. Dashboard refresh should continue the
     newest child instead of reopening the old parent.
     """
-    from elidia_state import SessionDB
+    from store.factory import create_session_store
 
     def row_get(row, key, index):
         if isinstance(row, dict):
@@ -4406,7 +4406,7 @@ def _session_latest_descendant(session_id: str):
             except Exception:
                 return None
 
-    db = SessionDB()
+    db = create_session_store()
     try:
         sid = db.resolve_session_id(session_id)
         if not sid or not db.get_session(sid):
@@ -4520,8 +4520,8 @@ async def bulk_delete_sessions_endpoint(body: BulkDeleteSessions):
             status_code=400,
             detail="ids must contain at most 500 entries",
         )
-    from elidia_state import SessionDB
-    db = SessionDB()
+    from store.factory import create_session_store
+    db = create_session_store()
     try:
         deleted = db.delete_sessions(body.ids)
         return {"ok": True, "deleted": deleted}
@@ -4537,8 +4537,8 @@ async def count_empty_sessions_endpoint():
     UI hides the affordance so users aren't presented with a button
     that does nothing. Cheap, single-COUNT query.
     """
-    from elidia_state import SessionDB
-    db = SessionDB()
+    from store.factory import create_session_store
+    db = create_session_store()
     try:
         return {"count": db.count_empty_sessions()}
     finally:
@@ -4565,8 +4565,8 @@ async def delete_empty_sessions_endpoint():
     prune-on-startup pass. Matching that pre-existing trade-off keeps
     the two delete endpoints' DB-vs-disk behaviour consistent.
     """
-    from elidia_state import SessionDB
-    db = SessionDB()
+    from store.factory import create_session_store
+    db = create_session_store()
     try:
         deleted = db.delete_empty_sessions()
         return {"ok": True, "deleted": deleted}
@@ -4581,9 +4581,9 @@ async def get_session_stats():
     Registered before ``/api/sessions/{session_id}`` so the literal ``stats``
     path isn't captured as a session id by the parameterized route.
     """
-    from elidia_state import SessionDB
+    from store.factory import create_session_store
 
-    db = SessionDB()
+    db = create_session_store()
     try:
         total = db.session_count(include_archived=True)
         active_store = db.session_count(include_archived=False)
@@ -4609,8 +4609,8 @@ async def get_session_stats():
 
 @app.get("/api/sessions/{session_id}")
 async def get_session_detail(session_id: str):
-    from elidia_state import SessionDB
-    db = SessionDB()
+    from store.factory import create_session_store
+    db = create_session_store()
     try:
         sid = db.resolve_session_id(session_id)
         session = db.get_session(sid) if sid else None
@@ -4636,8 +4636,8 @@ async def get_session_latest_descendant(session_id: str):
 
 @app.get("/api/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str):
-    from elidia_state import SessionDB
-    db = SessionDB()
+    from store.factory import create_session_store
+    db = create_session_store()
     try:
         sid = db.resolve_session_id(session_id)
         if not sid:
@@ -4650,8 +4650,8 @@ async def get_session_messages(session_id: str):
 
 @app.delete("/api/sessions/{session_id}")
 async def delete_session_endpoint(session_id: str):
-    from elidia_state import SessionDB
-    db = SessionDB()
+    from store.factory import create_session_store
+    db = create_session_store()
     try:
         if not db.delete_session(session_id):
             raise HTTPException(status_code=404, detail="Session not found")
@@ -4672,8 +4672,8 @@ async def rename_session_endpoint(session_id: str, body: SessionRename):
     ``title`` renames (empty/null clears the title); ``archived`` soft-hides or
     restores the session. Either field may be omitted.
     """
-    from elidia_state import SessionDB
-    db = SessionDB()
+    from store.factory import create_session_store
+    db = create_session_store()
     try:
         sid = db.resolve_session_id(session_id)
         if not sid:
@@ -4702,9 +4702,9 @@ async def rename_session_endpoint(session_id: str, body: SessionRename):
 @app.get("/api/sessions/{session_id}/export")
 async def export_session_endpoint(session_id: str):
     """Export a single session (metadata + messages) as JSON."""
-    from elidia_state import SessionDB
+    from store.factory import create_session_store
 
-    db = SessionDB()
+    db = create_session_store()
     try:
         sid = db.resolve_session_id(session_id)
         if not sid:
@@ -4727,9 +4727,9 @@ async def prune_sessions_endpoint(body: SessionPrune):
     """Delete ended sessions older than N days (mirrors `elidia sessions prune`)."""
     if body.older_than_days < 1:
         raise HTTPException(status_code=400, detail="older_than_days must be >= 1")
-    from elidia_state import SessionDB
+    from store.factory import create_session_store
 
-    db = SessionDB()
+    db = create_session_store()
     try:
         sessions_dir = get_elidia_home() / "sessions"
         removed = db.prune_sessions(
@@ -6771,10 +6771,10 @@ async def update_config_raw(body: RawConfigUpdate):
 
 @app.get("/api/analytics/usage")
 async def get_usage_analytics(days: int = 30):
-    from elidia_state import SessionDB
+    from store.factory import create_session_store
     from agent.insights import InsightsEngine
 
-    db = SessionDB()
+    db = create_session_store()
     try:
         cutoff = time.time() - (days * 86400)
         cur = db._conn.execute("""
@@ -6845,9 +6845,9 @@ async def get_models_analytics(days: int = 30):
     Returns token/cost/session breakdown per model plus capability metadata
     from models.dev (context window, vision, tools, reasoning, etc.).
     """
-    from elidia_state import SessionDB
+    from store.factory import create_session_store
 
-    db = SessionDB()
+    db = create_session_store()
     try:
         cutoff = time.time() - (days * 86400)
 

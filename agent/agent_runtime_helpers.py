@@ -1750,6 +1750,13 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
     elif function_name == "delegate_task":
         return _finish_agent_tool(agent._dispatch_delegate_task(function_args))
     else:
+        try:
+            from tools.portal_tool_proxy import maybe_proxy_tool
+            proxied = maybe_proxy_tool(function_name, function_args)
+            if proxied is not None:
+                return _finish_agent_tool(proxied)
+        except ImportError:
+            pass
         return _ra().handle_function_call(
             function_name, function_args, effective_task_id,
             tool_call_id=tool_call_id,

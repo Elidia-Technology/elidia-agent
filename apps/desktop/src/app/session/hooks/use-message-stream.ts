@@ -70,19 +70,56 @@ interface QueuedStreamDeltas {
 // `scripts/profile-typing-lag.md` for the measurement work behind this.
 const STREAM_DELTA_FLUSH_MS = 33
 
-// Gateway/provider failures sometimes arrive as message.complete text instead
-// of an explicit error event. Treat matches as inline assistant errors so they
-// persist like real error events and don't get erased by hydrate fallback.
-const COMPLETION_ERROR_PATTERNS = [
+// LEGACY FALLBACK ONLY. The gateway sends `payload.status === 'error'` on a
+// failed turn (tui_gateway/server.py sets it from result.error), and that
+// structured signal is what we trust now — see completeAssistantMessage.
+//
+// These patterns used to be the ONLY error detection, which meant a real
+// failure was reported to the user if and only if its text happened to match
+// one of three anchored regexes. A provider 402 arrives as
+// "Error: HTTP 402: Insufficient DT balance..." — anchored /^HTTP\s+\d{3}/
+// does not match it because the string starts with "Error: ". The turn was
+// then rendered as an ordinary (often empty) assistant message and the user
+// saw silence: the desktop looked broken while the CLI printed the 402 fine.
+//
+// Kept only so a gateway older than the status field still surfaces something.
+const LEGACY_COMPLETION_ERROR_PATTERNS = [
   /^API call failed after \d+ retries:/i,
   /^HTTP\s+\d{3}\b/i,
-  /^(Provider|Gateway)\s+error:/i
+  /^(Provider|Gateway)\s+error:/i,
+  /^Error:\s+/i
 ]
 
-function completionErrorText(finalText: string): string | null {
+function legacyCompletionErrorText(finalText: string): string | null {
   const text = finalText.trim()
 
-  return text && COMPLETION_ERROR_PATTERNS.some(re => re.test(text)) ? text : null
+  return text && LEGACY_COMPLETION_ERROR_PATTERNS.some(re => re.test(text)) ? text : null
+}
+
+// Shown when the gateway reports a failed turn but sends no text with it.
+// Silence is the one thing we must never render for a known failure.
+export const UNSPECIFIED_TURN_ERROR =
+  'The agent reported an error but sent no details. Check the logs (Settings -> Logs) for the cause.'
+
+/**
+ * Decide whether a completed turn should render as an error, and with what text.
+ *
+ * `turnStatus` is the gateway's own verdict and always wins when present. Only
+ * when it is absent (older gateway) do we fall back to sniffing the text.
+ */
+export function resolveCompletionError(
+  finalText: string,
+  turnStatus?: string
+): string | null {
+  if (turnStatus === 'error') {
+    return finalText.trim() || UNSPECIFIED_TURN_ERROR
+  }
+
+  if (turnStatus) {
+    return null
+  }
+
+  return legacyCompletionErrorText(finalText)
 }
 
 const SUBAGENT_EVENT_TYPES = new Set([
@@ -434,7 +471,7 @@ export function useMessageStream({
   )
 
   const completeAssistantMessage = useCallback(
-    (sessionId: string, text: string) => {
+    (sessionId: string, text: string, turnStatus?: string) => {
       let shouldHydrate = false
 
       const completedState = updateSessionState(sessionId, state => {
@@ -448,7 +485,10 @@ export function useMessageStream({
 
         const streamId = state.streamId
         const finalText = renderMediaTags(text).trim()
-        const completionError = completionErrorText(finalText)
+        // Structured status first: the gateway already knows the turn failed,
+        // so we never have to infer it from how the text happens to be worded.
+        // Fall back to the legacy patterns only when no status was sent.
+        const completionError = resolveCompletionError(finalText, turnStatus)
         const normalize = (value: string) => value.replace(/\s+/g, ' ').trim()
         const dedupeReference = normalize(finalText)
 
@@ -759,7 +799,8 @@ export function useMessageStream({
         }
 
         const finalText = coerceGatewayText(payload?.text) || coerceGatewayText(payload?.rendered)
-        completeAssistantMessage(sessionId, finalText)
+        const turnStatus = typeof payload?.status === 'string' ? payload.status : undefined
+        completeAssistantMessage(sessionId, finalText, turnStatus)
 
         if (isActiveEvent) {
           setTurnStartedAt(null)

@@ -1079,10 +1079,23 @@ class PluginManager:
 
         # 2. User plugins (~/.elidia/plugins/)
         user_dir = get_elidia_home() / "plugins"
-        logger.debug("Scanning user plugins: %s", user_dir)
-        user_manifests = self._scan_directory(user_dir, source="user")
-        logger.debug("  user: %d manifest(s)", len(user_manifests))
-        manifests.extend(user_manifests)
+        # When ELIDIA_HOME points at the repo root (common in hosted/scp
+        # deployments), the user-plugins directory is the SAME physical
+        # directory as the bundled-plugins directory scanned above. Scanning
+        # it again under source="user" would re-classify every bundled backend
+        # (web/*, image_gen/*, video_gen/*, browser/*, …) as an opt-in user
+        # plugin and silently disable it — the cause of "No web search/extract
+        # provider configured" on the hosted gateway. Skip the redundant scan.
+        if user_dir.resolve() == repo_plugins.resolve():
+            logger.debug(
+                "Skipping user plugin scan: %s == bundled dir %s",
+                user_dir, repo_plugins,
+            )
+        else:
+            logger.debug("Scanning user plugins: %s", user_dir)
+            user_manifests = self._scan_directory(user_dir, source="user")
+            logger.debug("  user: %d manifest(s)", len(user_manifests))
+            manifests.extend(user_manifests)
 
         # 3. Project plugins (./.elidia/plugins/)
         if _env_enabled("ELIDIA_ENABLE_PROJECT_PLUGINS"):

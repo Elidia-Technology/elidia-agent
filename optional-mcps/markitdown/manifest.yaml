@@ -1,0 +1,40 @@
+manifest_version: 1
+
+name: markitdown
+description: Convert PDF, DOCX, XLSX, PPTX and HTML to Markdown so the agent can read attached documents.
+source: https://github.com/microsoft/markitdown
+
+# Closes a real gap: non-image attachments are only NAMED to the model
+# (AIUT-3310), so a user who attached a contract or a CV got an agent that
+# could see the filename and nothing else. Law, medical, career, writing and
+# enterprise users all work this way.
+#
+# NOTE: markitdown-mcp publishes alpha versions only (0.0.1aN at time of
+# writing). It is included because the alternative is that attached documents
+# silently do not work, and because tools/mcp_tool.py circuit-breaks a failing
+# server rather than taking the agent down with it.
+# Runs gateway/mcp_servers/safe_markitdown.py, NOT the upstream
+# markitdown-mcp. Upstream resolves any URI it is handed and runs on the
+# gateway host: file:///etc/passwd returned passwd contents and
+# http://127.0.0.1:8000 reached the internal API (AIUT-3314). This wrapper
+# validates the URI before fetching — https only, CDN host only, and it
+# refuses hosts that resolve to loopback, private, link-local or reserved
+# addresses, so an allowlisted name cannot be rebound to something internal.
+transport:
+  type: stdio
+  command: python3
+  args:
+    - "-m"
+    - "gateway.mcp_servers.safe_markitdown"
+
+
+# Production pins pre-installed binaries instead of the one-shot launcher
+# above, so a server start does not depend on a registry fetch. See the
+# mcp_servers block in the deployed config.yaml.
+auth:
+  type: none
+
+tools:
+  # 1 tool: convert_to_markdown
+  resources: false
+  prompts: false

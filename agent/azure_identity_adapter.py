@@ -31,7 +31,6 @@ Requires: ``azure-identity`` (optional dependency — only needed when
 
 from __future__ import annotations
 
-import functools
 import logging
 import os
 import threading
@@ -104,14 +103,8 @@ def _require_azure_identity():
 def reset_credential_cache() -> None:
     """Clear the cached ``DefaultAzureCredential``. Used by tests and
     profile switches.
-
-    Defensive against tests that ``monkeypatch.setattr`` over
-    ``build_credential`` with a plain (non-lru-cached) function — those
-    won't expose ``cache_clear()`` until pytest reverts the patch.
     """
-    cache_clear = getattr(build_credential, "cache_clear", None)
-    if callable(cache_clear):
-        cache_clear()
+    _credential_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -141,8 +134,8 @@ class EntraIdentityConfig:
     so probes stay non-interactive by default. It is not written by the setup
     wizard.
 
-    The dataclass is frozen so it's hashable for ``functools.lru_cache``
-    keying, and serializable across multiprocessing boundaries (workers
+    The dataclass is frozen so it's hashable for cache keying, and
+    serializable across multiprocessing boundaries (workers
     rebuild the credential inside their own process).
     """
 
@@ -190,26 +183,32 @@ def _build_default_credential(config: EntraIdentityConfig) -> Any:
     return ai.DefaultAzureCredential(**kwargs)
 
 
-@functools.lru_cache(maxsize=1)
+_credential_cache: Dict[tuple, Any] = {}
+
+
+def _credential_tenant_key() -> str:
+    """Return the current tenant key for credential cache scoping (AIUT-3078 B2)."""
+    try:
+        from gateway.session_context import get_session_env
+        return get_session_env("ELIDIA_SESSION_KEY") or "_default_"
+    except Exception:
+        return "_default_"
+
+
 def build_credential(config: EntraIdentityConfig) -> Any:
     """Return the cached ``DefaultAzureCredential`` for ``config``.
 
-    Elidia processes use exactly one Entra config at a time (the
-    ``model.entra.*`` block in config.yaml drives every aux task,
-    subagent, and credential probe in the session). ``maxsize=1`` is
-    intentional: it reflects the actual usage pattern and keeps the
-    cache trivially small.
+    Cache is keyed by ``(config, tenant_key)`` so pooled tenants with
+    distinct Azure environments don't share a credential object
+    (AIUT-3078 B2). CLI mode uses a fixed tenant key — single-tenant.
 
-    ``EntraIdentityConfig`` is a frozen dataclass, so it's hashable and
-    safe as an LRU-cache key. ``functools.lru_cache`` is thread-safe in
-    CPython.
-
-    If two distinct configs are ever passed (tests do this; production
-    rarely), the LRU eviction handles it correctly — each call still
-    returns a credential matching its config; only one is cached at a
-    time. Use :func:`reset_credential_cache` to clear (e.g. in tests).
+    ``EntraIdentityConfig`` is a frozen dataclass, so it's hashable.
+    Use :func:`reset_credential_cache` to clear (e.g. in tests).
     """
-    return _build_default_credential(config)
+    key = (config, _credential_tenant_key())
+    if key not in _credential_cache:
+        _credential_cache[key] = _build_default_credential(config)
+    return _credential_cache[key]
 
 
 def build_token_provider(scope: Optional[str] = None,

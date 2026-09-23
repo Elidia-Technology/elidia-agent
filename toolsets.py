@@ -141,7 +141,7 @@ TOOLSETS = {
     
     "image_gen": {
         "description": "Creative generation tools (images)",
-        "tools": ["image_generate"],
+        "tools": ["image_generate", "generate_3d", "list_media_models"],
         "includes": []
     },
 
@@ -438,6 +438,34 @@ TOOLSETS = {
             # Home Assistant smart home control (gated on HASS_TOKEN via check_fn)
             "ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service",
 
+        ],
+        "includes": []
+    },
+
+    "elidia-web-portal": {
+        "description": "Portal web UI — research-capable agent with portal tool recommendation and knowledge (no terminal, file ops, code exec, browser, cron, home automation)",
+        "tools": [
+            "web_search", "web_extract",
+            "vision_analyze", "image_generate",
+            # video_generate belongs here with the other media tools: the portal
+            # endpoint, the proxy mapping (video_generate -> generate_video) and
+            # its billing all exist, but the tool was never listed in this
+            # toolset, so the web agent could price a video and never render one
+            # ("I don't have a video-generation tool exposed in this session").
+            "video_generate",
+            "generate_3d", "list_media_models",
+            "research_state", "research_gate", "research_personas", "research_deck",
+            "research_sources",
+            "skills_list", "skill_view",
+            "todo", "memory",
+            "session_search",
+            "delegate_task",
+            "text_to_speech",
+            "clarify",
+            # Portal-native tools — call the portal backend directly
+            # (no Developer API key needed, same machine)
+            "portal_tool_catalog", "portal_tool_open", "portal_rag_search",
+            "portal_deck_publish",
         ],
         "includes": []
     },

@@ -5,8 +5,12 @@
 
 import type { DesktopTheme, DesktopThemeTypography } from './types'
 
+// Collapse is the Elidia brand face (bundled from @aiutils/ui, all seven
+// weights declared in styles.css). It leads the stack so the app renders in
+// brand typography; the system faces stay behind it as the fallback for any
+// glyph Collapse does not cover.
 const SYSTEM_SANS =
-  '"Segoe WPC", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif'
+  '"Collapse", "Segoe WPC", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif'
 
 const SYSTEM_MONO = '"Cascadia Code", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace'
 

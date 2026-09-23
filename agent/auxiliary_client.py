@@ -78,6 +78,44 @@ def _load_openai_cls() -> type:
     return _OPENAI_CLS_CACHE
 
 
+# The portal's model API lives under this path prefix. Any client pointed at
+# it must identify the billing user, whichever of this module's 14 client
+# construction sites built it.
+_PORTAL_BASE_URL_MARKER = "/agent-v2/"
+
+
+def _inject_portal_headers(kwargs: dict) -> None:
+    """Add the portal's auth headers to a client aimed at the portal.
+
+    The portal resolves the billing user from ``X-Portal-User-Id`` and
+    authenticates with ``X-Gateway-Token``. Only the MAIN client set them, so
+    every tool using an auxiliary client got
+
+        400 user_id required (body field or X-Portal-User-Id header)
+
+    ``vision_analyze`` is the one users see: it resolves its own client through
+    ``resolve_vision_provider_client``, a different path again, so fixing the
+    provider-pool sites alone left it broken (AIUT-3310).
+
+    Injecting here covers every site at once. Existing headers always win, so a
+    caller that sets its own is never overridden, and non-portal clients are
+    untouched.
+    """
+    try:
+        base_url = str(kwargs.get("base_url") or "")
+        if _PORTAL_BASE_URL_MARKER not in base_url:
+            return
+        portal = _portal_default_headers(str(kwargs.get("api_key") or ""))
+        if not portal:
+            return
+        headers = dict(kwargs.get("default_headers") or {})
+        for key, value in portal.items():
+            headers.setdefault(key, value)
+        kwargs["default_headers"] = headers
+    except Exception as exc:  # pragma: no cover - must never block a client
+        logger.debug("Portal header injection skipped: %s", exc)
+
+
 class _OpenAIProxy:
     """Module-level proxy that looks like the ``openai.OpenAI`` class.
 
@@ -88,6 +126,7 @@ class _OpenAIProxy:
     __slots__ = ()
 
     def __call__(self, *args, **kwargs):
+        _inject_portal_headers(kwargs)
         return _load_openai_cls()(*args, **kwargs)
 
     def __instancecheck__(self, obj):
@@ -393,6 +432,36 @@ def build_nvidia_nim_headers(base_url: str | None) -> dict:
 # (main loop, aux, compression, web_extract). Do not inline a literal here;
 # see agent/portal_tags.py for the rationale.
 from agent.portal_tags import elidia_portal_tags as _elidia_portal_tags
+
+
+def _portal_default_headers(api_key: str) -> dict:
+    """Headers the portal requires on an auxiliary call.
+
+    The portal resolves the billing user from ``X-Portal-User-Id`` and
+    authenticates with ``X-Gateway-Token``. The MAIN client sets both (see
+    agent_init.py, provider == "portal"), but the auxiliary client did not, so
+    tools that use it — ``vision_analyze`` above all — were answered with
+
+        400 user_id required (body field or X-Portal-User-Id header)
+
+    and the agent told the user it could not see their image (AIUT-3310).
+    """
+    headers: dict = {}
+    try:
+        from gateway.session_context import get_session_env
+        uid = get_session_env("ELIDIA_SESSION_USER_ID", "")
+        if uid:
+            headers["X-Portal-User-Id"] = str(uid)
+    except Exception as exc:
+        # Builds a client mid-conversation: a session-context failure must
+        # degrade to an unidentified call the portal can reject cleanly, not
+        # take down the tool that is trying to run.
+        logger.debug("Could not read portal session user: %s", exc)
+    if api_key:
+        headers["X-Gateway-Token"] = api_key
+    return headers
+
+
 
 
 def _elidia_extra_body() -> dict:
@@ -1447,6 +1516,8 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
                 extra["default_headers"] = copilot_default_headers()
             elif base_url_host_matches(base_url, "integrate.api.nvidia.com"):
                 extra["default_headers"] = build_nvidia_nim_headers(base_url)
+            elif provider_id == "portal":
+                extra["default_headers"] = _portal_default_headers(api_key)
             else:
                 try:
                     from providers import get_provider_profile as _gpf_aux
@@ -1484,6 +1555,8 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
             extra["default_headers"] = copilot_default_headers()
         elif base_url_host_matches(base_url, "integrate.api.nvidia.com"):
             extra["default_headers"] = build_nvidia_nim_headers(base_url)
+        elif provider_id == "portal":
+            extra["default_headers"] = _portal_default_headers(api_key)
         else:
             try:
                 from providers import get_provider_profile as _gpf_aux2
@@ -3251,6 +3324,12 @@ def _to_async_client(sync_client, model: str, is_vision: bool = False):
                     async_kwargs["default_headers"] = dict(_ph_async.default_headers)
         except Exception:
             pass
+    # The async client is rebuilt from the sync client's key and base url, and
+    # reconstructs default_headers from scratch — so the portal headers put on
+    # the sync client are lost here. vision_analyze runs on the async client,
+    # which is why it kept getting "user_id required" long after the sync
+    # construction sites were fixed (AIUT-3310).
+    _inject_portal_headers(async_kwargs)
     return AsyncOpenAI(**async_kwargs), model
 
 

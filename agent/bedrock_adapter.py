@@ -54,8 +54,22 @@ except Exception:
 # This keeps startup fast for users who don't use Bedrock.
 # ---------------------------------------------------------------------------
 
-_bedrock_runtime_client_cache: Dict[str, Any] = {}
-_bedrock_control_client_cache: Dict[str, Any] = {}
+_bedrock_runtime_client_cache: Dict[Tuple[str, str], Any] = {}
+_bedrock_control_client_cache: Dict[Tuple[str, str], Any] = {}
+
+
+def _tenant_key() -> str:
+    """Return the current tenant key for cache scoping (AIUT-3078 B2).
+
+    In the pooled runtime each tenant gets its own boto3 client so
+    credentials resolved from the default chain never leak across tenants.
+    CLI mode (no session context) returns a fixed key — single-tenant.
+    """
+    try:
+        from gateway.session_context import get_session_env
+        return get_session_env("ELIDIA_SESSION_KEY") or "_default_"
+    except Exception:
+        return "_default_"
 
 
 def _require_boto3():
@@ -75,23 +89,27 @@ def _get_bedrock_runtime_client(region: str):
     """Get or create a cached ``bedrock-runtime`` client for the given region.
 
     Uses the default AWS credential chain (env vars → profile → instance role).
+    Cache is keyed by ``(region, tenant_key)`` so pooled tenants with
+    distinct credentials don't share a client.
     """
-    if region not in _bedrock_runtime_client_cache:
+    key = (region, _tenant_key())
+    if key not in _bedrock_runtime_client_cache:
         boto3 = _require_boto3()
-        _bedrock_runtime_client_cache[region] = boto3.client(
+        _bedrock_runtime_client_cache[key] = boto3.client(
             "bedrock-runtime", region_name=region,
         )
-    return _bedrock_runtime_client_cache[region]
+    return _bedrock_runtime_client_cache[key]
 
 
 def _get_bedrock_control_client(region: str):
     """Get or create a cached ``bedrock`` control-plane client for model discovery."""
-    if region not in _bedrock_control_client_cache:
+    key = (region, _tenant_key())
+    if key not in _bedrock_control_client_cache:
         boto3 = _require_boto3()
-        _bedrock_control_client_cache[region] = boto3.client(
+        _bedrock_control_client_cache[key] = boto3.client(
             "bedrock", region_name=region,
         )
-    return _bedrock_control_client_cache[region]
+    return _bedrock_control_client_cache[key]
 
 
 def reset_client_cache():
@@ -101,7 +119,7 @@ def reset_client_cache():
 
 
 def invalidate_runtime_client(region: str) -> bool:
-    """Evict the cached ``bedrock-runtime`` client for a single region.
+    """Evict the cached ``bedrock-runtime`` client for the current tenant + region.
 
     Per-region counterpart to :func:`reset_client_cache`. Used by the converse
     call wrappers to discard clients whose underlying HTTP connection has
@@ -111,8 +129,9 @@ def invalidate_runtime_client(region: str) -> bool:
     Returns True if a cached entry was evicted, False if the region was not
     cached.
     """
-    existed = region in _bedrock_runtime_client_cache
-    _bedrock_runtime_client_cache.pop(region, None)
+    key = (region, _tenant_key())
+    existed = key in _bedrock_runtime_client_cache
+    _bedrock_runtime_client_cache.pop(key, None)
     return existed
 
 

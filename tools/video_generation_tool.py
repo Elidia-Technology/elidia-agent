@@ -148,10 +148,17 @@ VIDEO_GENERATE_SCHEMA: Dict[str, Any] = {
             "model": {
                 "type": "string",
                 "description": (
-                    "Optional model override. If omitted, the user's "
-                    "configured ``video_gen.model`` (set via `elidia tools` "
-                    "→ Video Generation) is used. Models that the active "
-                    "provider does not know are rejected."
+                    "Explicit model endpoint_id from the `list_media_models` "
+                    "tool. Omit to let the portal auto-pick by quality tier."
+                ),
+            },
+            "quality": {
+                "type": "string",
+                "enum": ["economy", "standard", "premium"],
+                "description": (
+                    "Quality tier when no explicit model is chosen (economy = "
+                    "fast/cheap, standard = balanced, premium = highest "
+                    "quality). Ignored when `model` is set."
                 ),
             },
         },
@@ -202,6 +209,20 @@ def check_video_generation_requirements() -> bool:
     Triggers plugin discovery (idempotent) so user-installed plugins are
     visible to the toolset gate.
     """
+    # In portal mode the gateway does not render video itself: the call is
+    # proxied to the portal (video_generate -> generate_video), which has the
+    # provider keys and does the billing. Without this branch the tool was
+    # gated off in the web portal even though the portal could render — the
+    # agent could price a video and then say it had no tool to render it
+    # (AIUT-3306). Mirrors tools/portal_media_tools.check_portal_media_requirements.
+    try:
+        from tools.portal_tool_proxy import _is_portal_mode
+
+        if _is_portal_mode():
+            return True
+    except Exception:
+        pass
+
     try:
         from agent.video_gen_registry import list_providers
         from elidia_cli.plugins import _ensure_plugins_discovered

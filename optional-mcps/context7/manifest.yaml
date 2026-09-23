@@ -1,0 +1,29 @@
+manifest_version: 1
+
+name: context7
+description: Version-accurate library and framework documentation lookup.
+source: https://github.com/upstash/context7
+
+# Answers about libraries are where a model's training cutoff produces
+# confident, wrong code. The API key is a service key, not user data, so one
+# shared credential is acceptable in a multi-tenant deployment.
+transport:
+  type: stdio
+  command: npx
+  args:
+    - "-y"
+    - "@upstash/context7-mcp"
+
+
+# Production pins pre-installed binaries instead of the one-shot launcher
+# above, so a server start does not depend on a registry fetch. See the
+# mcp_servers block in the deployed config.yaml.
+auth:
+  type: none
+
+tools:
+  # 2 tools: resolve-library-id, query-docs. The resource/prompt plumbing is
+  # suppressed — 4 extra definitions per server on every request, for tools the
+  # agent does not need.
+  resources: false
+  prompts: false

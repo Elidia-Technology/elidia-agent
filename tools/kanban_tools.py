@@ -31,6 +31,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+
+from gateway.session_context import get_session_env
 from typing import Any, Optional
 
 from tools.registry import registry, tool_error
@@ -121,7 +123,7 @@ def _stamp_worker_session_metadata(
     """Add trusted worker session id metadata for this worker's own task."""
     if os.environ.get("ELIDIA_KANBAN_TASK") != task_id:
         return metadata
-    session_id = os.environ.get("ELIDIA_SESSION_ID")
+    session_id = get_session_env("ELIDIA_SESSION_ID")
     if not session_id:
         return metadata
     stamped = dict(metadata or {})
@@ -741,7 +743,7 @@ def _handle_create(args: dict, **kw) -> str:
     # Stamp the originating session id when the agent loop runs under
     # ACP (which sets ELIDIA_SESSION_ID before invoking tools). NULL on
     # CLI / dashboard paths and on legacy hosts that don't set the env.
-    session_id = args.get("session_id") or os.environ.get("ELIDIA_SESSION_ID")
+    session_id = args.get("session_id") or get_session_env("ELIDIA_SESSION_ID")
     priority = args.get("priority")
     # Resolve workspace. If the caller passed one explicitly, honor it.
     # Otherwise, a dispatcher-spawned worker (ELIDIA_KANBAN_TASK set)

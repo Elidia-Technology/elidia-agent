@@ -1045,8 +1045,9 @@ def handle_research_state(args: Dict[str, Any], **_kw) -> str:
     fn = dispatch.get(action)
     if fn is None:
         return tool_error(
-            f"unknown action {action!r}. Valid: start, record_sources, add_claims, "
-            "set_gaps, add_candidates, resolve_contested, next_round, get, finish, list"
+            f"unknown action {action!r}. Valid: start, record_sources, record_retrieval, "
+            "retrieval_report, add_claims, set_gaps, add_candidates, add_positions, "
+            "add_options, set_falsifier, resolve_contested, next_round, get, finish, list"
         )
     return json.dumps(fn(), indent=2, default=str)
 
@@ -1152,6 +1153,14 @@ RESEARCH_STATE_SCHEMA = {
                     "the thesis wrong."
                 ),
             },
+            "query": {
+                "type": "string",
+                "description": (
+                    "record_retrieval: the actual search query sent to the "
+                    "origin. Required so retrieval productivity can be "
+                    "measured per query, not just per origin."
+                ),
+            },
             "origin": {
                 "type": "string",
                 "description": (
@@ -1189,6 +1198,8 @@ RESEARCH_STATE_SCHEMA = {
                                         "description": "high only when a source states it directly and unambiguously."},
                         "sub_question": {"type": "string", "description": "Which sub-question this answers."},
                         "contested": {"type": "boolean", "description": "True when sources disagree."},
+                        "as_of": {"type": "string", "description": "market mode: the date this claim was true as of (e.g. '2026-09-01'). Required by the market gate."},
+                        "basis": {"type": "string", "enum": ["measured", "projected"], "description": "market mode: whether the claim is measured fact or a projection. Required by the market gate."},
                     },
                     "required": ["claim", "source"],
                 },

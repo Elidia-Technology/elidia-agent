@@ -234,6 +234,99 @@ def _pdb(query: str, limit: int) -> List[Dict[str, Any]]:
     return records
 
 
+def _openfda(query: str, limit: int) -> List[Dict[str, Any]]:
+    """FDA drug labels, adverse events, and recalls via openFDA.
+
+    Two endpoints are queried: drug labels (SPL) for approved indications,
+    warnings, and pharmacology, and drug adverse events (FAERS) for
+    post-market safety signals. Both are free, keyless, and authoritative
+    for US-approved therapeutics.
+    """
+    logger.debug(f"Entered into _openfda: limit={limit}")
+    records: List[Dict[str, Any]] = []
+    label_limit = max(1, limit // 2) or 1
+    event_limit = max(1, limit - label_limit)
+
+    try:
+        labels = _get("https://api.fda.gov/drug/label.json",
+                       params={"search": query, "limit": label_limit})
+        for item in labels.get("results", []):
+            openfda = item.get("openfda", {})
+            records.append({
+                "source": "openfda",
+                "type": "drug_label",
+                "id": item.get("id") or item.get("set_id"),
+                "brand_name": (openfda.get("brand_name") or [None])[0],
+                "generic_name": (openfda.get("generic_name") or [None])[0],
+                "manufacturer": (openfda.get("manufacturer_name") or [None])[0],
+                "indications": (item.get("indications_and_usage") or [None])[0][:500]
+                    if item.get("indications_and_usage") else None,
+                "mechanism": (item.get("mechanism_of_action") or [None])[0][:500]
+                    if item.get("mechanism_of_action") else None,
+                "pharmacology": (item.get("clinical_pharmacology") or [None])[0][:500]
+                    if item.get("clinical_pharmacology") else None,
+                "route": (openfda.get("route") or [None])[0],
+                "url": "https://labels.fda.gov/",
+            })
+    except SourceError:
+        logger.warning("openfda drug labels failed for query: %s", query)
+
+    try:
+        events = _get("https://api.fda.gov/drug/event.json",
+                       params={"search": query, "limit": event_limit})
+        for item in events.get("results", []):
+            patient = item.get("patient", {})
+            drugs = patient.get("drug", [])
+            reactions = patient.get("reaction", [])
+            records.append({
+                "source": "openfda",
+                "type": "adverse_event",
+                "id": item.get("safetyreportid"),
+                "drugs": [d.get("medicinalproduct") for d in drugs[:5]],
+                "reactions": [r.get("reactionmeddrapt") for r in reactions[:8]],
+                "serious": item.get("serious"),
+                "date": item.get("receiptdate"),
+                "country": item.get("occurcountry"),
+            })
+    except SourceError:
+        logger.warning("openfda adverse events failed for query: %s", query)
+
+    return records
+
+
+def _chembl(query: str, limit: int) -> List[Dict[str, Any]]:
+    """Drug-target interactions and compound data from ChEMBL (EMBL-EBI).
+
+    Searches the molecule endpoint for compounds matching the query, returning
+    clinical phase, molecular properties, and target information. ChEMBL is the
+    reference database for medicinal chemistry and structure-activity data.
+    """
+    logger.debug(f"Entered into _chembl: limit={limit}")
+    data = _get("https://www.ebi.ac.uk/chembl/api/data/molecule/search.json",
+                params={"q": query, "limit": limit})
+    records = []
+    for mol in data.get("molecules", []):
+        props = mol.get("molecule_properties") or {}
+        records.append({
+            "source": "chembl",
+            "id": mol.get("molecule_chembl_id"),
+            "name": mol.get("pref_name"),
+            "type": mol.get("molecule_type"),
+            "max_phase": mol.get("max_phase"),
+            "first_approval": mol.get("first_approval"),
+            "oral": mol.get("oral"),
+            "topical": mol.get("topical"),
+            "parenteral": mol.get("parenteral"),
+            "molecular_weight": props.get("full_mwt"),
+            "alogp": props.get("alogp"),
+            "hba": props.get("hba"),
+            "hbd": props.get("hbd"),
+            "psa": props.get("psa"),
+            "url": f"https://www.ebi.ac.uk/chembl/compound_report_card/{mol.get('molecule_chembl_id')}/",
+        })
+    return records
+
+
 def _crossref(query: str, limit: int) -> List[Dict[str, Any]]:
     """DOI metadata and citation counts across publishers."""
     logger.debug(f"Entered into _crossref: limit={limit}")
@@ -252,6 +345,149 @@ def _crossref(query: str, limit: int) -> List[Dict[str, Any]]:
             "venue": (item.get("container-title") or [None])[0],
             "cited_by": item.get("is-referenced-by-count"),
             "url": item.get("URL"),
+        })
+    return records
+
+
+def _patents(query: str, limit: int) -> List[Dict[str, Any]]:
+    """US patent data via USPTO PatentsView API.
+
+    Searches granted US patents by text query. Returns patent number, title,
+    assignee, inventors, filing/grant dates, CPC classifications, and abstract.
+    Covers all technology domains: electronics, mechanical, biotech, pharma,
+    semiconductors, aerospace, materials science, and more.
+    """
+    logger.debug(f"Entered into _patents: limit={limit}")
+    payload = json.dumps({
+        "q": {"_text_any": {"patent_abstract": query}},
+        "f": ["patent_number", "patent_title", "patent_date",
+              "patent_abstract", "patent_num_claims"],
+        "o": {"per_page": limit},
+        "s": [{"patent_date": "desc"}],
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.patentsview.org/patents/query",
+        data=payload,
+        headers={"User-Agent": USER_AGENT, "Content-Type": "application/json",
+                 "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            raise SourceError("rate limited by USPTO PatentsView") from exc
+        raise SourceError(f"HTTP {exc.code} from USPTO PatentsView") from exc
+    except Exception as exc:
+        raise SourceError(f"{type(exc).__name__}: {exc}") from exc
+
+    records = []
+    for pat in data.get("patents", []):
+        pnum = pat.get("patent_number")
+        records.append({
+            "source": "patents",
+            "id": pnum,
+            "title": pat.get("patent_title"),
+            "date": pat.get("patent_date"),
+            "abstract": (pat.get("patent_abstract") or "")[:500] or None,
+            "num_claims": pat.get("patent_num_claims"),
+            "url": f"https://patents.google.com/patent/US{pnum}" if pnum else None,
+        })
+    return records
+
+
+def _sec_edgar(query: str, limit: int) -> List[Dict[str, Any]]:
+    """SEC EDGAR full-text search for company filings and disclosures.
+
+    Searches 10-K, 10-Q, 8-K, proxy statements, and other SEC filings.
+    Essential for business research, corporate due diligence, market analysis,
+    and regulatory compliance.
+    """
+    logger.debug(f"Entered into _sec_edgar: limit={limit}")
+    data = _get("https://efts.sec.gov/LATEST/search-index",
+                params={"q": query, "dateRange": "custom",
+                        "startdt": "2020-01-01", "forms": "",
+                        "hits.hits.total": limit,
+                        "hits.hits._source": "file_date,display_date_dt,"
+                                             "file_description,form_type,"
+                                             "entity_name,file_num,biz_locations"})
+    # EDGAR EFTS returns a nested structure; fall back to the simpler endpoint
+    # if the response shape is unexpected.
+    if not isinstance(data, dict) or "hits" not in data:
+        data = _get("https://efts.sec.gov/LATEST/search-index",
+                    params={"q": query, "forms": "",
+                            "from": 0, "size": limit})
+
+    records = []
+    hits = data.get("hits", {}).get("hits", [])
+    for hit in hits[:limit]:
+        src = hit.get("_source", {})
+        records.append({
+            "source": "sec_edgar",
+            "id": hit.get("_id"),
+            "title": src.get("file_description"),
+            "entity": src.get("entity_name"),
+            "form_type": src.get("form_type"),
+            "date": src.get("file_date") or src.get("display_date_dt", "")[:10],
+            "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={urllib.parse.quote(query)}&type=&dateb=&owner=include&count={limit}&search_text=&action=getcompany",
+        })
+    return records
+
+
+def _courtlistener(query: str, limit: int) -> List[Dict[str, Any]]:
+    """US case law opinions via CourtListener (Free Law Project).
+
+    Searches court opinions across federal and state jurisdictions. Returns
+    case name, court, date, citation, and docket number. CourtListener is the
+    largest open collection of US case law with over 8 million opinions.
+    """
+    logger.debug(f"Entered into _courtlistener: limit={limit}")
+    data = _get("https://www.courtlistener.com/api/rest/v4/search/",
+                params={"q": query, "type": "o", "page_size": limit,
+                        "format": "json"})
+    records = []
+    for item in data.get("results", []):
+        records.append({
+            "source": "courtlistener",
+            "id": item.get("id"),
+            "title": item.get("caseName"),
+            "court": item.get("court"),
+            "date": item.get("dateFiled"),
+            "citation": (item.get("citation") or [None])[0] if isinstance(
+                item.get("citation"), list) else item.get("citation"),
+            "docket_number": item.get("docketNumber"),
+            "status": item.get("status"),
+            "snippet": item.get("snippet", "")[:400] if item.get("snippet") else None,
+            "url": f"https://www.courtlistener.com{item.get('absolute_url', '')}",
+        })
+    return records
+
+
+def _federal_register(query: str, limit: int) -> List[Dict[str, Any]]:
+    """US federal regulations, rules, and notices via the Federal Register API.
+
+    Searches proposed rules, final rules, presidential documents, and notices.
+    Returns document type, agency, publication date, and effective date.
+    Essential for regulatory compliance research.
+    """
+    logger.debug(f"Entered into _federal_register: limit={limit}")
+    data = _get("https://www.federalregister.gov/api/v1/documents.json",
+                params={"conditions[term]": query, "per_page": limit,
+                        "order": "relevance"})
+    records = []
+    for item in data.get("results", []):
+        records.append({
+            "source": "federal_register",
+            "id": item.get("document_number"),
+            "title": item.get("title"),
+            "type": item.get("type"),
+            "agencies": [a.get("name") for a in item.get("agencies", [])][:5],
+            "publication_date": item.get("publication_date"),
+            "effective_date": item.get("effective_on"),
+            "abstract": (item.get("abstract") or "")[:500] or None,
+            "cfr_references": item.get("cfr_references"),
+            "url": item.get("html_url"),
         })
     return records
 
@@ -315,6 +551,42 @@ SOURCES: Dict[str, Dict[str, Any]] = {
         "covers": "Experimentally determined 3D macromolecular structures, "
                   "with the method used to determine each.",
     },
+    "openfda": {
+        "fn": _openfda, "needs_key": False,
+        "covers": "FDA drug labels (indications, mechanism of action, pharmacology), "
+                  "adverse event reports (FAERS), and drug recalls. Authoritative for "
+                  "US-approved therapeutics, post-market safety, and regulatory status.",
+    },
+    "chembl": {
+        "fn": _chembl, "needs_key": False,
+        "covers": "Drug-target interactions, compound properties, clinical phase, "
+                  "and structure-activity data from EMBL-EBI. The reference database "
+                  "for medicinal chemistry and drug discovery.",
+    },
+    "patents": {
+        "fn": _patents, "needs_key": False,
+        "covers": "Granted US patents across all technology domains — electronics, "
+                  "semiconductors, biotech, pharma, mechanical, aerospace, materials, "
+                  "software. Includes title, abstract, claims, and classification.",
+    },
+    "sec_edgar": {
+        "fn": _sec_edgar, "needs_key": False,
+        "covers": "SEC company filings (10-K, 10-Q, 8-K, proxies) for business "
+                  "research, corporate due diligence, financial analysis, and "
+                  "regulatory compliance.",
+    },
+    "courtlistener": {
+        "fn": _courtlistener, "needs_key": False,
+        "covers": "US case law — 8M+ court opinions across federal and state "
+                  "jurisdictions. Case name, court, citation, docket number, and "
+                  "opinion text snippets.",
+    },
+    "federal_register": {
+        "fn": _federal_register, "needs_key": False,
+        "covers": "US federal regulations, proposed rules, final rules, and "
+                  "presidential documents. Essential for regulatory compliance, "
+                  "policy analysis, and understanding the regulatory landscape.",
+    },
     "crossref": {
         "fn": _crossref, "needs_key": False,
         "covers": "DOI metadata and citation counts across publishers and "
@@ -335,9 +607,32 @@ PACKS: Dict[str, Dict[str, Any]] = {
         "sources": ["pubmed", "europepmc", "clinicaltrials"],
         "for": "Clinical questions, disease mechanisms, treatments, outcomes.",
     },
+    "pharmacology": {
+        "sources": ["pubmed", "clinicaltrials", "openfda", "chembl"],
+        "for": "Drug discovery, pharmacology, drug-target interactions, clinical "
+               "trials, FDA-approved therapeutics, adverse events, and medicinal "
+               "chemistry. Use for any question about drugs, compounds, or therapies.",
+    },
     "molecular": {
         "sources": ["uniprot", "pdb", "pubmed"],
         "for": "Proteins, structures, binding sites, sequence and function.",
+    },
+    "legal": {
+        "sources": ["courtlistener", "federal_register", "openalex"],
+        "for": "US case law, court opinions, federal regulations, proposed rules, "
+               "and legal scholarship. Use for legal research, compliance analysis, "
+               "regulatory questions, and precedent search.",
+    },
+    "business": {
+        "sources": ["sec_edgar", "openalex", "patents"],
+        "for": "Corporate filings, market analysis, due diligence, competitive "
+               "intelligence, and business-relevant patents.",
+    },
+    "engineering": {
+        "sources": ["patents", "openalex", "crossref"],
+        "for": "Technology patents, engineering research, hardware design, "
+               "semiconductors, materials science, aerospace, drones, robotics, "
+               "and applied R&D across all engineering domains.",
     },
     "scholarly": {
         "sources": ["openalex", "crossref"],
@@ -463,13 +758,20 @@ def handle_research_sources(args: Dict[str, Any], **kw) -> str:
 RESEARCH_SOURCES_SCHEMA = {
     "name": "research_sources",
     "description": (
-        "Authoritative domain sources the open web cannot substitute for: "
-        "PubMed and Europe PMC (biomedical literature), ClinicalTrials.gov "
-        "(registered studies with status and phase), UniProt (protein function), "
-        "RCSB PDB (3D structures), Crossref and OpenAlex (citations and DOIs).\n\n"
-        "Use it for any clinical, molecular, pharmacological or scholarly "
-        "question. A web search returns what someone wrote about the evidence; "
-        "these return the evidence. All are free and need no key.\n\n"
+        "Authoritative domain sources the open web cannot substitute for:\n"
+        "• Biomedical — PubMed, Europe PMC (literature), ClinicalTrials.gov (studies)\n"
+        "• Molecular — UniProt (proteins), RCSB PDB (3D structures)\n"
+        "• Pharmacology — OpenFDA (drug labels, adverse events), ChEMBL (drug-target, "
+        "compounds, clinical phase)\n"
+        "• Legal — CourtListener (US case law, 8M+ opinions), Federal Register "
+        "(regulations, rules)\n"
+        "• Business — SEC EDGAR (corporate filings, 10-K, 10-Q, 8-K)\n"
+        "• Engineering — USPTO PatentsView (patents across all tech domains)\n"
+        "• Scholarly — Crossref and OpenAlex (citations, DOIs, venues)\n\n"
+        "Use it for clinical, molecular, pharmacological, legal, business, "
+        "engineering, or scholarly questions. A web search returns what someone "
+        "wrote about the evidence; these return the evidence itself. All are "
+        "free and need no key.\n\n"
         "Start with action='packs' to see what each source covers, then choose. "
         "Which sources fit a question is a judgement — a question about a drug's "
         "effect on a protein wants clinical, molecular and literature sources at "
@@ -492,14 +794,15 @@ RESEARCH_SOURCES_SCHEMA = {
                 "items": {"type": "string"},
                 "description": (
                     "search: any of pubmed, europepmc, clinicaltrials, uniprot, "
-                    "pdb, crossref, openalex."
+                    "pdb, openfda, chembl, patents, sec_edgar, courtlistener, "
+                    "federal_register, crossref, openalex."
                 ),
             },
             "pack": {
                 "type": "string",
                 "description": (
-                    "search: a starting group — biomedical, molecular or "
-                    "scholarly. Combines with `sources`."
+                    "search: a starting group — biomedical, pharmacology, molecular, "
+                    "legal, business, engineering, or scholarly. Combines with `sources`."
                 ),
             },
             "limit": {

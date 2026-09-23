@@ -343,10 +343,10 @@ atexit.register(_shutdown_sessions)
 def _get_db():
     global _db, _db_error
     if _db is None:
-        from elidia_state import SessionDB
-
         try:
-            _db = SessionDB()
+            from store.factory import create_session_store
+
+            _db = create_session_store()
             _db_error = None
         except Exception as exc:
             _db_error = str(exc)

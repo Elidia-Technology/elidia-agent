@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/icon.png" width="112" alt="Elidia Agent">
+  <img src="https://aiutils.io/images/elidia-lockup-dark.png" alt="Elidia Agent" >
 </p>
 
 <h1 align="center">Elidia Agent for VS Code</h1>

@@ -682,13 +682,14 @@ class SessionStore:
         self._lock = threading.Lock()
         self._has_active_processes_fn = has_active_processes_fn
         
-        # Initialize SQLite session database
+        # Initialize session database (SQLite or Postgres depending on
+        # ELIDIA_STORE_BACKEND; the factory resolves which backend to use).
         self._db = None
         try:
-            from elidia_state import SessionDB
-            self._db = SessionDB()
+            from store.factory import create_session_store
+            self._db = create_session_store()
         except Exception as e:
-            print(f"[gateway] Warning: SQLite session store unavailable, falling back to JSONL: {e}")
+            print(f"[gateway] Warning: Session store unavailable, falling back to JSONL: {e}")
     
     def _ensure_loaded(self) -> None:
         """Load sessions index from disk if not already loaded."""

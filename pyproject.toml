@@ -171,6 +171,13 @@ acp = ["agent-client-protocol==0.9.0"]
 mistral = ["mistralai==2.4.8"]
 bedrock = ["boto3==1.42.89"]
 azure-identity = ["azure-identity==1.25.3"]
+# Pooled-runtime session store (AIUT-3078 Phase A). psycopg3 (sync) + its
+# connection pool + Alembic for schema migrations. The store is only ever
+# exercised in `run_in_executor` threads (never the async event loop), so
+# the sync driver is correct and avoids the asyncpg-in-loop footgun. This
+# extra is opt-in: the default single-process CLI keeps SQLite; the pooled
+# gateway worker enables it. Not in [all] — see the [all] policy above.
+postgres = ["psycopg[binary]==3.3.4", "psycopg-pool==3.3.1", "alembic==1.19.1"]
 termux = [
   # Baseline Android / Termux path for reliable fresh installs.
   "python-telegram-bot[webhooks]==22.6",
@@ -285,7 +292,7 @@ plugins = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["agent", "agent.*", "tools", "tools.*", "elidia_cli", "elidia_cli.*", "gateway", "gateway.*", "tui_gateway", "tui_gateway.*", "cron", "acp_adapter", "plugins", "plugins.*", "providers", "providers.*"]
+include = ["agent", "agent.*", "tools", "tools.*", "elidia_cli", "elidia_cli.*", "gateway", "gateway.*", "tui_gateway", "tui_gateway.*", "cron", "acp_adapter", "plugins", "plugins.*", "providers", "providers.*", "store", "store.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

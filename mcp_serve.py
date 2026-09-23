@@ -69,12 +69,12 @@ def _get_sessions_dir() -> Path:
 
 
 def _get_session_db():
-    """Get a SessionDB instance for reading message transcripts."""
+    """Get a session store instance for reading message transcripts."""
     try:
-        from elidia_state import SessionDB
-        return SessionDB()
+        from store.factory import create_session_store
+        return create_session_store()
     except Exception as e:
-        logger.debug("SessionDB unavailable: %s", e)
+        logger.debug("Session store unavailable: %s", e)
         return None
 
 

@@ -3322,10 +3322,10 @@ class ElidiaCLI:
         # Initialize SQLite session store early so /title works before first message
         self._session_db = None
         try:
-            from elidia_state import SessionDB
-            self._session_db = SessionDB()
+            from store.factory import create_session_store
+            self._session_db = create_session_store()
         except Exception as e:
-            logger.warning("Failed to initialize SessionDB — session will NOT be indexed for search: %s", e)
+            logger.warning("Failed to initialize session store — session will NOT be indexed for search: %s", e)
 
         # Opportunistic state.db maintenance — runs at most once per
         # min_interval_hours, tracked via state_meta in state.db itself so
@@ -5030,10 +5030,10 @@ class ElidiaCLI:
         # Initialize SQLite session store for CLI sessions (if not already done in __init__)
         if self._session_db is None:
             try:
-                from elidia_state import SessionDB
-                self._session_db = SessionDB()
+                from store.factory import create_session_store
+                self._session_db = create_session_store()
             except Exception as e:
-                logger.warning("SQLite session store not available — session will NOT be indexed: %s", e)
+                logger.warning("Session store not available — session will NOT be indexed: %s", e)
         
         # If resuming, validate the session exists and load its history.
         # _preload_resumed_session() may have already loaded it (called from
@@ -6734,8 +6734,8 @@ class ElidiaCLI:
         # Make sure we have a SessionDB handle.
         if not self._session_db:
             try:
-                from elidia_state import SessionDB
-                self._session_db = SessionDB()
+                from store.factory import create_session_store
+                self._session_db = create_session_store()
             except Exception:
                 pass
         if not self._session_db:
@@ -10569,10 +10569,10 @@ class ElidiaCLI:
                 i += 1
 
         try:
-            from elidia_state import SessionDB
+            from store.factory import create_session_store
             from agent.insights import InsightsEngine
 
-            db = SessionDB()
+            db = create_session_store()
             engine = InsightsEngine(db)
             report = engine.generate(days=days, source=source)
             print(engine.format_terminal(report))

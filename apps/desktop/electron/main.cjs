@@ -2651,8 +2651,19 @@ function closePreviewWatchers() {
   }
 }
 
+// A warm backend answers /api/status in a second or two. A COLD one does not:
+// straight after bootstrap the venv's interpreter, imports and tool registry are
+// all unpaged, and on a first launch that legitimately takes longer than 45s.
+// The old 45s ceiling turned that into "Desktop boot failed: Elidia backend did
+// not become ready", and the app only worked because the user launched it a
+// second time against a warm backend (observed twice in desktop.log on
+// 2026-08-24). Boot failure on first launch is the worst possible first
+// impression, and the cost of waiting longer is only paid when something really
+// is wrong.
+const ELIDIA_READY_TIMEOUT_MS = 150_000
+
 async function waitForElidia(baseUrl, token) {
-  const deadline = Date.now() + 45_000
+  const deadline = Date.now() + ELIDIA_READY_TIMEOUT_MS
   let lastError = null
 
   while (Date.now() < deadline) {

@@ -1407,10 +1407,9 @@ class ElidiaACPAgent(acp.Agent):
         previous_approval_cb = None
         previous_interactive = None
         edit_approval_token = None
-        previous_session_id = None
 
         def _run_agent() -> dict:
-            nonlocal previous_approval_cb, previous_interactive, edit_approval_token, previous_session_id
+            nonlocal previous_approval_cb, previous_interactive, edit_approval_token
             # Bind ELIDIA_SESSION_KEY for this session so per-session caches
             # (e.g. the interactive sudo password cache in tools.terminal_tool)
             # scope to the ACP session rather than leaking across sessions
@@ -1445,13 +1444,15 @@ class ElidiaACPAgent(acp.Agent):
             # and the non-interactive auto-approve path must not fire.
             previous_interactive = os.environ.get("ELIDIA_INTERACTIVE")
             os.environ["ELIDIA_INTERACTIVE"] = "1"
-            # Propagate the originating ACP session id to tools that want to
-            # tag side-effects with it (e.g. ``kanban_create`` stamps it on
-            # the new task so clients can render a per-session board). Save
-            # and restore around the agent call so a re-used executor thread
-            # never leaks one session's id into the next session's tools.
-            previous_session_id = os.environ.get("ELIDIA_SESSION_ID")
-            os.environ["ELIDIA_SESSION_ID"] = session_id
+            # Propagate the originating ACP session id to tools via the
+            # task-local ContextVar (safe under copy_context).  The old
+            # os.environ write was process-global and leaked across
+            # concurrent sessions (AIUT-3078 B1).
+            try:
+                from gateway.session_context import set_current_session_id
+                set_current_session_id(session_id)
+            except Exception:
+                logger.debug("Could not set ACP session id context", exc_info=True)
             try:
                 result = agent.run_conversation(
                     user_message=user_content,
@@ -1469,11 +1470,8 @@ class ElidiaACPAgent(acp.Agent):
                     os.environ.pop("ELIDIA_INTERACTIVE", None)
                 else:
                     os.environ["ELIDIA_INTERACTIVE"] = previous_interactive
-                # Restore ELIDIA_SESSION_ID symmetrically.
-                if previous_session_id is None:
-                    os.environ.pop("ELIDIA_SESSION_ID", None)
-                else:
-                    os.environ["ELIDIA_SESSION_ID"] = previous_session_id
+                # ELIDIA_SESSION_ID: no restore needed — ContextVar is
+                # scoped by copy_context() (AIUT-3078 B1).
                 if approval_cb:
                     try:
                         from tools import terminal_tool as _terminal_tool

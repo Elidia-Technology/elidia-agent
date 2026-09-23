@@ -1367,10 +1367,10 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
     # and discoverable via session_search (same pattern as gateway/run.py).
     _session_db = None
     try:
-        from elidia_state import SessionDB
-        _session_db = SessionDB()
+        from store.factory import create_session_store
+        _session_db = create_session_store()
     except Exception as e:
-        logger.debug("Job '%s': SQLite session store not available: %s", job.get("id", "?"), e)
+        logger.debug("Job '%s': session store not available: %s", job.get("id", "?"), e)
 
     # Wake-gate: if this job has a pre-check script, run it BEFORE building
     # the prompt so a ``{"wakeAgent": false}`` response can short-circuit

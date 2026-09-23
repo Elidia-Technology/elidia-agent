@@ -8,6 +8,7 @@ import { DesktopInstallOverlay } from '@/components/desktop-install-overlay'
 import { DesktopOnboardingOverlay } from '@/components/desktop-onboarding-overlay'
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay'
 import { Pane, PaneMain } from '@/components/pane-shell'
+import { hydrateWouldDropAnswer } from '@/lib/hydrate-guard'
 import { useSkinCommand } from '@/themes/use-skin-command'
 
 import { formatRefValue } from '../components/assistant-ui/directive-text'
@@ -319,18 +320,47 @@ export function DesktopController() {
       }
 
       for (let index = 0; index < Math.max(1, attempts); index += 1) {
+        let accepted = false
+
         try {
           const latest = await getSessionMessages(storedSessionId)
+          const fetched = toChatMessages(latest.messages)
+
           updateSessionState(
             runtimeSessionId,
-            state => ({
-              ...state,
-              messages: preserveLocalAssistantErrors(toChatMessages(latest.messages), state.messages)
-            }),
+            state => {
+              // Hydration exists to fill in when the live stream payload was
+              // empty. It must never REMOVE an answer already on screen.
+              //
+              // This used to replace state.messages unconditionally and return
+              // on the first fetch that did not throw. The session store does
+              // not always have the assistant turn yet at that moment, so the
+              // streamed reply was painted and then wiped a few hundred
+              // milliseconds later — the user saw a response flash and vanish,
+              // with no error anywhere. Reported from a shipped build,
+              // 2026-08-24.
+              //
+              // The retry loop below never helped, because it only retried on
+              // an exception; "fetched successfully, but stale" looked like
+              // success.
+              if (hydrateWouldDropAnswer(state.messages, fetched)) {
+                // Stale snapshot. Keep what is rendered and try again.
+                return state
+              }
+
+              accepted = true
+
+              return {
+                ...state,
+                messages: preserveLocalAssistantErrors(fetched, state.messages)
+              }
+            },
             storedSessionId
           )
 
-          return
+          if (accepted) {
+            return
+          }
         } catch {
           // Best-effort fallback when live stream payloads are empty.
         }

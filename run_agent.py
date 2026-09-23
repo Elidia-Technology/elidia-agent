@@ -454,22 +454,22 @@ class AIAgent:
         )
 
     def _get_session_db_for_recall(self):
-        """Return a SessionDB for recall, lazily creating it if an entrypoint forgot.
+        """Return a session store for recall, lazily creating it if an entrypoint forgot.
 
         Most frontends pass ``session_db`` into ``AIAgent`` explicitly, but recall
         is important enough that a missing constructor argument should degrade by
-        opening the default state DB instead of making the advertised
+        opening the default store instead of making the advertised
         ``session_search`` tool unusable.
         """
         if self._session_db is not None:
             return self._session_db
         try:
-            from elidia_state import SessionDB
+            from store.factory import create_session_store
 
-            self._session_db = SessionDB()
+            self._session_db = create_session_store()
             return self._session_db
         except Exception as exc:
-            logger.debug("SessionDB unavailable for recall", exc_info=True)
+            logger.debug("Session store unavailable for recall", exc_info=True)
             return None
 
     def _ensure_db_session(self) -> None:
@@ -3602,6 +3602,22 @@ class AIAgent:
             build_nvidia_nim_headers,
             build_or_headers,
         )
+
+        if getattr(self, "provider", "") == "portal":
+            headers = {}
+            try:
+                from gateway.session_context import get_session_env
+                uid = get_session_env("ELIDIA_SESSION_USER_ID", "")
+                if uid:
+                    headers["X-Portal-User-Id"] = str(uid)
+            except ImportError:
+                pass
+            api_key = self._client_kwargs.get("api_key", "")
+            if api_key:
+                headers["X-Gateway-Token"] = api_key
+            if headers:
+                self._client_kwargs["default_headers"] = headers
+            return
 
         if base_url_host_matches(base_url, "openrouter.ai"):
             self._client_kwargs["default_headers"] = build_or_headers()

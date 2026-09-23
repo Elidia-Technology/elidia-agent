@@ -70,6 +70,32 @@ CHAT_COMPLETIONS_SSE_KEEPALIVE_SECONDS = 30.0
 MAX_NORMALIZED_TEXT_LENGTH = 65_536  # 64 KB cap for normalized content parts
 MAX_CONTENT_LIST_SIZE = 1_000  # Max items when content is an array
 
+# Injected as the ephemeral system prompt when the portal sends X-Elidia-Mode:
+# research.  Without it, a research question is answered as a short chat reply
+# because nothing routes the agent to the deep-research skill — the "research
+# produces no HTML deck" symptom.  The instruction only points at tools and a
+# skill that already exist in the elidia-web-portal toolset; it adds no new
+# behaviour beyond forcing the loop to actually run and to publish a deck.
+_RESEARCH_MODE_SYSTEM_PROMPT = (
+    "# Research mode (autonomous deep research)\n"
+    "This is an autonomous deep-research task, not a chat answer. Load and follow "
+    "the `deep-research` skill end-to-end — start with `skill_view(name=\"deep-research\")` "
+    "and run its PLAN → GATHER → READ → CROSS-CHECK → SYNTHESIZE loop.\n"
+    "Use the research tools as the skill directs: `research_personas` to pick the expert "
+    "lens, `research_state(action=\"start\", ...)` to open the run, "
+    "`web_search`/`web_extract`/`research_sources` to gather evidence, and `research_gate` "
+    "to confirm the evidence is sufficient before synthesising. Do not stop at a short "
+    "text summary.\n"
+    "Finish by calling `research_deck(action=\"build\", run_id=...)`. That call "
+    "deterministically renders a professional single-page HTML deck from the recorded "
+    "analytics (KPI cards, charts, confidence badges, inline [N] citations, a limitations "
+    "section, and a references index) and publishes it directly to the portal — it returns "
+    "the download URL. Give the user that URL. Do NOT compose the HTML yourself and do NOT "
+    "call portal_deck_publish with hand-written HTML: the model-composed markup is "
+    "unreliable and gets truncated. If a sub-question could not be answered, it is already "
+    "reflected in the deck's limitations section — never fabricate evidence."
+)
+
 
 def _coerce_port(value: Any, default: int = DEFAULT_PORT) -> int:
     """Parse a listen port without letting malformed env/config values crash startup."""
@@ -653,6 +679,80 @@ def _derive_chat_session_id(
     return f"api-{digest}"
 
 
+# Tools whose result is forwarded to SSE clients on the ``completed``
+# lifecycle event (AIUT-3307). Before this, the result was discarded, so a
+# browser had no way to learn the URL of a generated asset and could only show
+# whatever the model happened to write into its prose. The list is a whitelist
+# rather than "forward everything" because most tool results are large
+# (web pages, file contents) and none of the others drive a UI widget.
+_RESULT_FORWARDING_TOOLS = frozenset({
+    "image_generate",
+    "video_generate",
+    "text_to_speech",
+    "generate_3d",
+    "portal_tool_open",
+})
+
+# Keys copied out of a forwarded result. Anything else is dropped, so a tool
+# that grows a large or sensitive field later does not start leaking it onto
+# the wire by default.
+_RESULT_FORWARDED_KEYS = (
+    "success", "status", "error", "credits_used", "model",
+    "action", "url", "name", "description", "tool_slug", "credit_cost",
+)
+
+# Single-asset keys the media tools use, in the order they are searched when
+# no explicit ``urls`` list is present.
+_RESULT_MEDIA_URL_KEYS = ("image", "video", "audio", "model_3d")
+
+MAX_FORWARDED_RESULT_BYTES = 4096
+
+
+def _extract_tool_result_for_sse(
+    function_name: str,
+    function_result: Any,
+) -> Optional[Dict[str, Any]]:
+    """Build the compact result payload carried on ``elidia.tool.progress``.
+
+    Returns ``None`` when nothing should be forwarded — an unlisted tool, a
+    result that is not a JSON object, or one that survives filtering but is
+    still too large. Never raises: a malformed tool result must not be able to
+    break the SSE stream that carries the assistant's answer.
+    """
+    if function_name not in _RESULT_FORWARDING_TOOLS:
+        return None
+    try:
+        parsed = function_result
+        if isinstance(parsed, (str, bytes)):
+            parsed = json.loads(parsed)
+        if not isinstance(parsed, dict):
+            return None
+
+        out: Dict[str, Any] = {
+            k: parsed[k] for k in _RESULT_FORWARDED_KEYS if parsed.get(k) is not None
+        }
+
+        urls = parsed.get("urls")
+        if not isinstance(urls, list):
+            urls = [parsed[k] for k in _RESULT_MEDIA_URL_KEYS if parsed.get(k)]
+        urls = [u for u in urls if isinstance(u, str) and u.startswith("http")]
+        if urls:
+            out["urls"] = urls
+
+        if not out:
+            return None
+        if len(json.dumps(out)) > MAX_FORWARDED_RESULT_BYTES:
+            logger.warning(
+                "Tool result for %s exceeds %s bytes after filtering; not forwarded",
+                function_name, MAX_FORWARDED_RESULT_BYTES,
+            )
+            return None
+        return out
+    except Exception as exc:
+        logger.warning("Could not extract tool result for %s: %s", function_name, exc)
+        return None
+
+
 _CRON_AVAILABLE = False
 try:
     from cron.jobs import (
@@ -685,7 +785,7 @@ class APIServerAdapter(BasePlatformAdapter):
     and routes them through elidia-agent's AIAgent.
     """
 
-    def __init__(self, config: PlatformConfig):
+    def __init__(self, config: PlatformConfig, *, gateway_trusted: bool = False):
         super().__init__(config, Platform.API_SERVER)
         extra = config.extra or {}
         self._host: str = extra.get("host", os.getenv("API_SERVER_HOST", DEFAULT_HOST))
@@ -718,6 +818,10 @@ class APIServerAdapter(BasePlatformAdapter):
         # in-flight run by run_id.
         self._run_approval_sessions: Dict[str, str] = {}
         self._session_db: Optional[Any] = None  # Lazy-init SessionDB for session continuity
+        # When True, the HostedGateway has already verified the JWT and set
+        # tenant context via ContextVar — skip API_SERVER_KEY auth and use
+        # per-tenant session stores from the shared Postgres pool (B4).
+        self._gateway_trusted: bool = gateway_trusted
 
     @staticmethod
     def _parse_cors_origins(value: Any) -> tuple[str, ...]:
@@ -753,6 +857,24 @@ class APIServerAdapter(BasePlatformAdapter):
         except Exception:
             pass
         return "elidia-agent"
+
+    @staticmethod
+    def _normalize_request_model(model: str) -> str:
+        """Normalize a caller-supplied model ref to portal ``vendor/model`` form.
+
+        The portal web client sends ``vendor::model`` (e.g.
+        ``deepseek::deepseek-v4-flash``); the portal model API expects
+        ``vendor/model``. ``"auto"`` / ``"elidia-agent-v2"`` mean "use the
+        gateway config default", so they normalize to ``""`` (caller falls back
+        to ``_resolve_gateway_model()``). Any other string is passed through so
+        a bare catalog name still resolves server-side.
+        """
+        m = (model or "").strip()
+        if not m or m in {"auto", "elidia-agent-v2"}:
+            return ""
+        if "::" in m:
+            return m.replace("::", "/")
+        return m
 
     def _cors_headers_for_origin(self, origin: str) -> Optional[Dict[str, str]]:
         """Return CORS headers for an allowed browser origin."""
@@ -847,7 +969,12 @@ class APIServerAdapter(BasePlatformAdapter):
         Returns None if auth is OK, or a 401 web.Response on failure.
         connect() refuses to start the API server without API_SERVER_KEY, so
         the no-key branch only exists for tests or unsupported manual wiring.
+
+        In ``_gateway_trusted`` mode the hosted gateway has already verified
+        the JWT — skip API_SERVER_KEY auth entirely (AIUT-3078 B4).
         """
+        if self._gateway_trusted:
+            return None
         if not self._api_key:
             return None
 
@@ -902,7 +1029,7 @@ class APIServerAdapter(BasePlatformAdapter):
         if not raw:
             return None, None
 
-        if not self._api_key:
+        if not self._api_key and not self._gateway_trusted:
             logger.warning(
                 "X-Elidia-Session-Key rejected: no API key configured. "
                 "Set API_SERVER_KEY to enable long-term memory scoping."
@@ -935,18 +1062,42 @@ class APIServerAdapter(BasePlatformAdapter):
     # Session DB helper
     # ------------------------------------------------------------------
 
-    def _ensure_session_db(self):
-        """Lazily initialise and return the shared SessionDB instance.
+    def _get_current_tenant(self) -> Optional[str]:
+        """Return the current tenant id from the ContextVar, if any."""
+        if not self._gateway_trusted:
+            return None
+        try:
+            from gateway.session_context import get_session_env
+            key = get_session_env("ELIDIA_SESSION_KEY")
+            return key or None
+        except Exception:
+            return None
 
-        Sessions are persisted to ``state.db`` so that ``elidia sessions list``
-        shows API-server conversations alongside CLI and gateway ones.
+    def _ensure_session_db(self):
+        """Return a SessionDB / SessionStore for the current context.
+
+        In ``_gateway_trusted`` mode each tenant gets a per-request store
+        scoped by ``user_id`` from the shared Postgres connection pool
+        (AIUT-3078 B4). The store instance is lightweight — it references
+        the shared pool and sets ``_scope_user_id`` for row-level isolation.
+
+        In standalone mode the existing lazy-singleton is returned.
         """
+        tenant = self._get_current_tenant()
+        if tenant:
+            try:
+                from store.factory import create_session_store
+                return create_session_store(user_id=tenant)
+            except Exception as e:
+                logger.debug("Tenant session store unavailable: %s", e)
+                return None
+
         if self._session_db is None:
             try:
-                from elidia_state import SessionDB
-                self._session_db = SessionDB()
+                from store.factory import create_session_store
+                self._session_db = create_session_store()
             except Exception as e:
-                logger.debug("SessionDB unavailable for API server: %s", e)
+                logger.debug("Session store unavailable for API server: %s", e)
         return self._session_db
 
     # ------------------------------------------------------------------
@@ -962,6 +1113,7 @@ class APIServerAdapter(BasePlatformAdapter):
         tool_start_callback=None,
         tool_complete_callback=None,
         gateway_session_key: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Any:
         """
         Create an AIAgent instance using the gateway's runtime config.
@@ -977,14 +1129,23 @@ class APIServerAdapter(BasePlatformAdapter):
         key is meant to persist across transcripts so long-term memory
         providers (e.g. Honcho) can scope their per-chat state correctly
         — matching the semantics of the native gateway's ``session_key``.
+
+        In ``_gateway_trusted`` mode the session key defaults to the tenant
+        id from the ContextVar (set by the WorkerPool) when no explicit
+        header was sent (AIUT-3078 B4).
         """
+        if gateway_session_key is None:
+            gateway_session_key = self._get_current_tenant()
+
         from run_agent import AIAgent
         from gateway.run import _resolve_runtime_agent_kwargs, _resolve_gateway_model, _load_gateway_config, GatewayRunner
         from elidia_cli.tools_config import _get_platform_tools
 
         runtime_kwargs = _resolve_runtime_agent_kwargs()
         reasoning_config = GatewayRunner._load_reasoning_config()
-        model = _resolve_gateway_model()
+        # Thread the caller-selected model (portal "vendor/model" format) through
+        # to the agent; fall back to config.yaml's default when not supplied.
+        model = model or _resolve_gateway_model()
 
         user_config = _load_gateway_config()
         enabled_toolsets = sorted(_get_platform_tools(user_config, "api_server"))
@@ -1711,6 +1872,18 @@ class APIServerAdapter(BasePlatformAdapter):
                     return _multimodal_validation_error(exc, param=f"messages[{idx}].content")
                 conversation_messages.append({"role": role, "content": content})
 
+        # Portal "research" mode → force the autonomous deep-research loop ending
+        # in a published HTML deck.  The portal proxy sends X-Elidia-Mode
+        # (chat|research|code|creative); without this, a research question is
+        # answered as a short chat reply because nothing routes it to the
+        # deep-research skill.
+        mode = request.headers.get("X-Elidia-Mode", "").strip().lower()
+        if mode == "research":
+            system_prompt = (
+                f"{_RESEARCH_MODE_SYSTEM_PROMPT}\n\n{system_prompt}"
+                if system_prompt else _RESEARCH_MODE_SYSTEM_PROMPT
+            )
+
         # Extract the last user message as the primary input
         user_message: Any = ""
         history = []
@@ -1737,12 +1910,13 @@ class APIServerAdapter(BasePlatformAdapter):
         # When provided, history is loaded from state.db instead of from the request body.
         #
         # Security: session continuation exposes conversation history, so it is
-        # only allowed when the API key is configured and the request is
-        # authenticated.  Without this gate, any unauthenticated client could
-        # read arbitrary session history by guessing/enumerating session IDs.
+        # only allowed when the caller is authenticated — either via API key
+        # or via the hosted gateway's shared-secret tenant middleware.
+        # Without this gate, any unauthenticated client could read arbitrary
+        # session history by guessing/enumerating session IDs.
         provided_session_id = request.headers.get("X-Elidia-Session-Id", "").strip()
         if provided_session_id:
-            if not self._api_key:
+            if not self._api_key and not self._gateway_trusted:
                 logger.warning(
                     "Session continuation via X-Elidia-Session-Id rejected: "
                     "no API key configured.  Set API_SERVER_KEY to enable "
@@ -1784,6 +1958,9 @@ class APIServerAdapter(BasePlatformAdapter):
 
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
         model_name = body.get("model", self._model_name)
+        # The model the user actually selected (portal "vendor/model" form); "" means
+        # "use the gateway config default". Threaded through _run_agent → _create_agent.
+        request_model = self._normalize_request_model(body.get("model", ""))
         created = int(time.time())
 
         if stream:
@@ -1843,11 +2020,18 @@ class APIServerAdapter(BasePlatformAdapter):
                 if not tool_call_id or tool_call_id not in _started_tool_call_ids:
                     return
                 _started_tool_call_ids.discard(tool_call_id)
-                _stream_q.put(("__tool_progress__", {
+                payload = {
                     "tool": function_name,
                     "toolCallId": tool_call_id,
                     "status": "completed",
-                }))
+                }
+                # Carry the asset URLs so a browser can render a real player
+                # or image panel instead of relying on the model to write a
+                # link into its prose (AIUT-3307).
+                result = _extract_tool_result_for_sse(function_name, function_result)
+                if result is not None:
+                    payload["result"] = result
+                _stream_q.put(("__tool_progress__", payload))
 
             # Start agent in background.  agent_ref is a mutable container
             # so the SSE writer can interrupt the agent on client disconnect.
@@ -1868,6 +2052,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 tool_complete_callback=_on_tool_complete,
                 agent_ref=agent_ref,
                 gateway_session_key=gateway_session_key,
+                model=request_model or None,
             ))
             # Ensure SSE drain loops can terminate without relying on polling
             # agent_task.done(), which can race with queue timeout checks.
@@ -1887,6 +2072,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 ephemeral_system_prompt=system_prompt,
                 session_id=session_id,
                 gateway_session_key=gateway_session_key,
+                model=request_model or None,
             )
 
         idempotency_key = request.headers.get("Idempotency-Key")
@@ -3435,6 +3621,7 @@ class APIServerAdapter(BasePlatformAdapter):
         tool_complete_callback=None,
         agent_ref: Optional[list] = None,
         gateway_session_key: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> tuple:
         """
         Create an agent and run a conversation in a thread executor.
@@ -3447,7 +3634,9 @@ class APIServerAdapter(BasePlatformAdapter):
         callers (e.g. the SSE writer) to call ``agent.interrupt()`` from
         another thread to stop in-progress LLM calls.
         """
+        import contextvars
         loop = asyncio.get_running_loop()
+        ctx = contextvars.copy_context()
 
         def _run():
             agent = self._create_agent(
@@ -3458,6 +3647,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 tool_start_callback=tool_start_callback,
                 tool_complete_callback=tool_complete_callback,
                 gateway_session_key=gateway_session_key,
+                model=model,
             )
             if agent_ref is not None:
                 agent_ref[0] = agent
@@ -3480,7 +3670,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 result["session_id"] = _eff_sid
             return result, usage
 
-        return await loop.run_in_executor(None, _run)
+        return await loop.run_in_executor(None, lambda: ctx.run(_run))
 
     # ------------------------------------------------------------------
     # /v1/runs — structured event streaming
@@ -4079,6 +4269,70 @@ class APIServerAdapter(BasePlatformAdapter):
     # BasePlatformAdapter interface
     # ------------------------------------------------------------------
 
+    def register_routes(self, app: "web.Application") -> None:
+        """Register api_server routes on an external aiohttp Application.
+
+        Used by the hosted gateway (AIUT-3078 B5) to mount the api_server
+        handlers on the gateway app without starting a separate TCP server.
+        """
+        logger.debug("Entered into APIServerAdapter.register_routes")
+        self._app = app
+        self._register_routes_on(app)
+
+    async def start_background_tasks(self) -> None:
+        """Start background maintenance tasks (orphaned-run sweep).
+
+        Called by the hosted gateway after the event loop is running.
+        ``connect()`` starts these internally; ``register_routes()`` does not
+        start a server, so the caller is responsible for calling this once
+        the loop is up (e.g. via ``app.on_startup``).
+        """
+        logger.debug("Entered into APIServerAdapter.start_background_tasks")
+        sweep_task = asyncio.create_task(self._sweep_orphaned_runs())
+        try:
+            self._background_tasks.add(sweep_task)
+        except TypeError:
+            pass
+        if hasattr(sweep_task, "add_done_callback"):
+            sweep_task.add_done_callback(self._background_tasks.discard)
+
+    def _register_routes_on(self, app: "web.Application") -> None:
+        """Register all handler routes on ``app``."""
+        app.router.add_get("/health", self._handle_health)
+        app.router.add_get("/health/detailed", self._handle_health_detailed)
+        app.router.add_get("/v1/health", self._handle_health)
+        app.router.add_get("/v1/models", self._handle_models)
+        app.router.add_get("/v1/capabilities", self._handle_capabilities)
+        app.router.add_get("/v1/skills", self._handle_skills)
+        app.router.add_get("/v1/toolsets", self._handle_toolsets)
+        app.router.add_get("/api/sessions", self._handle_list_sessions)
+        app.router.add_post("/api/sessions", self._handle_create_session)
+        app.router.add_get("/api/sessions/{session_id}", self._handle_get_session)
+        app.router.add_patch("/api/sessions/{session_id}", self._handle_patch_session)
+        app.router.add_delete("/api/sessions/{session_id}", self._handle_delete_session)
+        app.router.add_get("/api/sessions/{session_id}/messages", self._handle_session_messages)
+        app.router.add_post("/api/sessions/{session_id}/fork", self._handle_fork_session)
+        app.router.add_post("/api/sessions/{session_id}/chat", self._handle_session_chat)
+        app.router.add_post("/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream)
+        app.router.add_post("/v1/chat/completions", self._handle_chat_completions)
+        app.router.add_post("/v1/responses", self._handle_responses)
+        app.router.add_get("/v1/responses/{response_id}", self._handle_get_response)
+        app.router.add_delete("/v1/responses/{response_id}", self._handle_delete_response)
+        app.router.add_get("/api/jobs", self._handle_list_jobs)
+        app.router.add_post("/api/jobs", self._handle_create_job)
+        app.router.add_get("/api/jobs/{job_id}", self._handle_get_job)
+        app.router.add_patch("/api/jobs/{job_id}", self._handle_update_job)
+        app.router.add_delete("/api/jobs/{job_id}", self._handle_delete_job)
+        app.router.add_post("/api/jobs/{job_id}/pause", self._handle_pause_job)
+        app.router.add_post("/api/jobs/{job_id}/resume", self._handle_resume_job)
+        app.router.add_post("/api/jobs/{job_id}/run", self._handle_run_job)
+        app.router.add_post("/v1/runs", self._handle_runs)
+        app.router.add_get("/v1/runs/{run_id}", self._handle_get_run)
+        app.router.add_get("/v1/runs/{run_id}/events", self._handle_run_events)
+        app.router.add_post("/v1/runs/{run_id}/approval", self._handle_run_approval)
+        app.router.add_post("/v1/runs/{run_id}/stop", self._handle_stop_run)
+        app["api_server_adapter"] = self
+
     async def connect(self) -> bool:
         """Start the aiohttp web server."""
         if not AIOHTTP_AVAILABLE:
@@ -4089,61 +4343,16 @@ class APIServerAdapter(BasePlatformAdapter):
             mws = [mw for mw in (cors_middleware, body_limit_middleware, security_headers_middleware) if mw is not None]
             self._app = web.Application(middlewares=mws, client_max_size=MAX_REQUEST_BYTES)
             assert self._app is not None
-            self._app.router.add_get("/health", self._handle_health)
-            self._app.router.add_get("/health/detailed", self._handle_health_detailed)
-            self._app.router.add_get("/v1/health", self._handle_health)
-            self._app.router.add_get("/v1/models", self._handle_models)
-            self._app.router.add_get("/v1/capabilities", self._handle_capabilities)
-            self._app.router.add_get("/v1/skills", self._handle_skills)
-            self._app.router.add_get("/v1/toolsets", self._handle_toolsets)
-            # Session/client control surface (thin wrappers over SessionDB + _run_agent)
-            self._app.router.add_get("/api/sessions", self._handle_list_sessions)
-            self._app.router.add_post("/api/sessions", self._handle_create_session)
-            self._app.router.add_get("/api/sessions/{session_id}", self._handle_get_session)
-            self._app.router.add_patch("/api/sessions/{session_id}", self._handle_patch_session)
-            self._app.router.add_delete("/api/sessions/{session_id}", self._handle_delete_session)
-            self._app.router.add_get("/api/sessions/{session_id}/messages", self._handle_session_messages)
-            self._app.router.add_post("/api/sessions/{session_id}/fork", self._handle_fork_session)
-            self._app.router.add_post("/api/sessions/{session_id}/chat", self._handle_session_chat)
-            self._app.router.add_post("/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream)
-            self._app.router.add_post("/v1/chat/completions", self._handle_chat_completions)
-            self._app.router.add_post("/v1/responses", self._handle_responses)
-            self._app.router.add_get("/v1/responses/{response_id}", self._handle_get_response)
-            self._app.router.add_delete("/v1/responses/{response_id}", self._handle_delete_response)
-            # Cron jobs management API
-            self._app.router.add_get("/api/jobs", self._handle_list_jobs)
-            self._app.router.add_post("/api/jobs", self._handle_create_job)
-            self._app.router.add_get("/api/jobs/{job_id}", self._handle_get_job)
-            self._app.router.add_patch("/api/jobs/{job_id}", self._handle_update_job)
-            self._app.router.add_delete("/api/jobs/{job_id}", self._handle_delete_job)
-            self._app.router.add_post("/api/jobs/{job_id}/pause", self._handle_pause_job)
-            self._app.router.add_post("/api/jobs/{job_id}/resume", self._handle_resume_job)
-            self._app.router.add_post("/api/jobs/{job_id}/run", self._handle_run_job)
-            # Structured event streaming
-            self._app.router.add_post("/v1/runs", self._handle_runs)
-            self._app.router.add_get("/v1/runs/{run_id}", self._handle_get_run)
-            self._app.router.add_get("/v1/runs/{run_id}/events", self._handle_run_events)
-            self._app.router.add_post("/v1/runs/{run_id}/approval", self._handle_run_approval)
-            self._app.router.add_post("/v1/runs/{run_id}/stop", self._handle_stop_run)
-            # Store the adapter after native routes are registered. Local Elidia-Relay
-            # bootstrap shims use this key as a feature-detection hook; registering
-            # native routes first lets those shims no-op instead of shadowing the
-            # upstream session-control handlers.
-            self._app["api_server_adapter"] = self
+            self._register_routes_on(self._app)
 
-            # Start background sweep to clean up orphaned (unconsumed) run streams
-            sweep_task = asyncio.create_task(self._sweep_orphaned_runs())
-            try:
-                self._background_tasks.add(sweep_task)
-            except TypeError:
-                pass
-            if hasattr(sweep_task, "add_done_callback"):
-                sweep_task.add_done_callback(self._background_tasks.discard)
+            await self.start_background_tasks()
 
             # Refuse to start without authentication. The API server can
             # dispatch terminal-capable agent work, so every deployment needs
             # an explicit API_SERVER_KEY regardless of bind address.
-            if not self._api_key:
+            # (gateway_trusted mode uses JWT auth instead — but connect()
+            # should not be called in that mode; register_routes() is used.)
+            if not self._api_key and not self._gateway_trusted:
                 logger.error(
                     "[%s] Refusing to start: API_SERVER_KEY is required for the API server, "
                     "including loopback-only binds on %s.",

@@ -745,6 +745,19 @@ def init_agent(
             elif base_url_host_matches(effective_base, "chatgpt.com"):
                 from agent.auxiliary_client import _codex_cloudflare_headers
                 client_kwargs["default_headers"] = _codex_cloudflare_headers(api_key)
+            elif agent.provider == "portal":
+                _portal_hdrs = {}
+                try:
+                    from gateway.session_context import get_session_env
+                    _uid = get_session_env("ELIDIA_SESSION_USER_ID", "")
+                    if _uid:
+                        _portal_hdrs["X-Portal-User-Id"] = str(_uid)
+                except ImportError:
+                    pass
+                if api_key:
+                    _portal_hdrs["X-Gateway-Token"] = api_key
+                if _portal_hdrs:
+                    client_kwargs["default_headers"] = _portal_hdrs
             elif "default_headers" not in client_kwargs:
                 # Fall back to profile.default_headers for providers that
                 # declare custom headers (e.g. Kimi User-Agent on non-kimi.com

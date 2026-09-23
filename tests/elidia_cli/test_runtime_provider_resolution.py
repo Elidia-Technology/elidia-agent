@@ -875,6 +875,10 @@ def test_named_custom_provider_falls_back_to_openai_api_key(monkeypatch):
 
 
 def test_named_custom_provider_does_not_shadow_builtin_provider(monkeypatch):
+    """A ``custom_providers`` entry named ``elidia`` must not shadow the
+    built-in. ``elidia`` now resolves to the ``aiutils`` API-key provider, so
+    the built-in (developer-api.aiutils.io) wins over a same-named custom entry.
+    """
     monkeypatch.setattr(
         rp,
         "load_config",
@@ -888,22 +892,12 @@ def test_named_custom_provider_does_not_shadow_builtin_provider(monkeypatch):
             ]
         },
     )
-    monkeypatch.setattr(
-        rp,
-        "resolve_elidia_runtime_credentials",
-        lambda **kwargs: {
-            "base_url": "https://inference-api.aiutils.io/v1",
-            "api_key": "elidia-runtime-key",
-            "source": "portal",
-            "expires_at": None,
-        },
-    )
 
     resolved = rp.resolve_runtime_provider(requested="elidia")
 
-    assert resolved["provider"] == "elidia"
-    assert resolved["base_url"] == "https://inference-api.aiutils.io/v1"
-    assert resolved["api_key"] == "elidia-runtime-key"
+    assert resolved["provider"] == "aiutils"
+    assert "developer-api.aiutils.io" in resolved["base_url"]
+    assert resolved["base_url"] != "http://localhost:1234/v1"
     assert resolved["requested_provider"] == "elidia"
 
 
@@ -936,9 +930,9 @@ def test_named_custom_provider_wins_over_builtin_alias(monkeypatch):
 
 
 def test_named_custom_provider_skipped_for_canonical_built_in(monkeypatch):
-    """Companion to the test above: ``elidia`` is a canonical provider name
-    (``resolve_provider('elidia') == 'elidia'``), so a custom entry with that name
-    should NOT be returned — the built-in wins as before.
+    """Companion to the test above: ``elidia`` is a registered provider name
+    (it now aliases to ``aiutils``), so a custom entry with that name should
+    NOT be returned — the built-in wins as before.
     """
     monkeypatch.setattr(
         rp,

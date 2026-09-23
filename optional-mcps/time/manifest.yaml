@@ -1,0 +1,25 @@
+manifest_version: 1
+
+name: time
+description: Current time and timezone conversion.
+source: https://github.com/modelcontextprotocol/servers/tree/main/src/time
+
+# Removes a whole class of quiet errors: "today", scheduling, deadlines and
+# date arithmetic, which a model otherwise answers from its training cutoff.
+transport:
+  type: stdio
+  command: uvx
+  args:
+    - "mcp-server-time"
+
+
+# Production pins pre-installed binaries instead of the one-shot launcher
+# above, so a server start does not depend on a registry fetch. See the
+# mcp_servers block in the deployed config.yaml.
+auth:
+  type: none
+
+tools:
+  # 2 tools: get_current_time, convert_time
+  resources: false
+  prompts: false

@@ -167,19 +167,17 @@ class TestBranchCommandCLI:
         assert cli_instance._resumed is True
 
     def test_branch_rotates_elidia_session_id_env_and_context(self, cli_instance, session_db):
-        """Branching must update process-local session-id readers too."""
+        """Branching must update the ContextVar session-id reader."""
         from cli import ElidiaCLI
         from gateway.session_context import _UNSET, _VAR_MAP, get_session_env
 
         old_session_id = cli_instance.session_id
-        os.environ["ELIDIA_SESSION_ID"] = old_session_id
         _VAR_MAP["ELIDIA_SESSION_ID"].set(old_session_id)
 
         try:
             ElidiaCLI._handle_branch_command(cli_instance, "/branch")
 
             assert cli_instance.session_id != old_session_id
-            assert os.environ["ELIDIA_SESSION_ID"] == cli_instance.session_id
             assert get_session_env("ELIDIA_SESSION_ID") == cli_instance.session_id
         finally:
             os.environ.pop("ELIDIA_SESSION_ID", None)

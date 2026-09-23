@@ -500,6 +500,15 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
             # ``test_named_custom_provider_does_not_shadow_builtin_provider``.
             if (canonical or "").strip().lower() == requested_norm:
                 return None
+            # A name that is itself a registered provider must still shadow a
+            # same-named ``custom_providers`` entry, even when it aliases to a
+            # different canonical provider (e.g. "elidia" → "aiutils"). Without
+            # this, the alias rewrite above would make a user-declared "elidia"
+            # custom provider win over the built-in. Only raw *aliases* that are
+            # not registered providers (e.g. "kimi" → "kimi-coding") defer to the
+            # custom entry — see test_named_custom_provider_wins_over_builtin_alias.
+            if requested_norm in auth_mod.PROVIDER_REGISTRY:
+                return None
 
     config = load_config()
     

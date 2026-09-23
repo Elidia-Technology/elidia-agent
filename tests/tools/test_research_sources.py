@@ -79,7 +79,11 @@ def test_packs_describe_what_each_source_covers(rs):
     """A name is not enough to choose between PubMed and ClinicalTrials."""
     out = json.loads(rs.handle_research_sources({"action": "packs"}))
 
-    assert set(out["packs"]) == {"biomedical", "molecular", "scholarly"}
+    assert set(out["packs"]) >= {"biomedical", "molecular", "scholarly"}
+    assert "pharmacology" in out["packs"]
+    assert "legal" in out["packs"]
+    assert "business" in out["packs"]
+    assert "engineering" in out["packs"]
     for name, spec in out["sources"].items():
         assert spec["covers"], f"{name} has no description"
         assert "needs_key" in spec

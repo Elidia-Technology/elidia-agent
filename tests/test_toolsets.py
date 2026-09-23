@@ -253,3 +253,20 @@ class TestDefaultPlatformWebSearchCoverage:
 
     def test_elidia_api_server_toolset_includes_web_search(self):
         assert "web_search" in resolve_toolset("elidia-api-server")
+
+
+class TestWebPortalMediaTools:
+    """The hosted web portal (platform api_server → elidia-web-portal) must
+    expose the media tools the agent needs to offer a model choice and
+    generate 3D — AIUT-3286."""
+
+    def test_web_portal_toolset_exposes_generate_3d(self):
+        assert "generate_3d" in resolve_toolset("elidia-web-portal")
+
+    def test_web_portal_toolset_exposes_list_media_models(self):
+        assert "list_media_models" in resolve_toolset("elidia-web-portal")
+
+    def test_web_portal_toolset_exposes_image_and_audio(self):
+        resolved = resolve_toolset("elidia-web-portal")
+        assert "image_generate" in resolved
+        assert "text_to_speech" in resolved
