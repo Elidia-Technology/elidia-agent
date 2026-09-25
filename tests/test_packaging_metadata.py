@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 import tomllib
 
@@ -76,6 +77,7 @@ def test_manifest_includes_bundled_skills():
 
     assert "graft skills" in manifest
     assert "graft optional-skills" in manifest
+    assert "graft optional-mcps" in manifest
 
 
 def test_bundled_plugin_manifests_ship_in_both_wheel_and_sdist():
@@ -202,27 +204,61 @@ def test_locked_starlette_is_not_vulnerable_to_cve_2026_48710():
         )
 
 
-def test_locale_catalogs_ship_in_both_wheel_and_sdist():
-    """Regression test for #27632 / #35374 / #23943.
+def _setup_data_dirs() -> tuple[str, ...] | None:
+    """Parse the DATA_DIRS tuple out of setup.py without executing setup()."""
+    src = (REPO_ROOT / "setup.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "DATA_DIRS":
+                    return ast.literal_eval(node.value)
+    return None
 
-    locales/ is a bare data directory (no __init__.py), so it is invisible to
-    packages.find and to package-data (which attaches to a package). It must be
-    declared as setuptools data-files (wheel) AND grafted in MANIFEST.in
-    (sdist). Without both, sealed installs drop the catalogs and gateway/CLI
-    commands surface raw i18n keys like `gateway.reset.header_default`.
+
+_BUNDLED_DATA_DIRS = ("locales", "skills", "optional-skills", "optional-mcps")
+
+
+def test_bundled_data_dirs_ship_in_both_wheel_and_sdist():
+    """Regression test for #27632 / #35374 / #23943 and #3415.
+
+    locales/, skills/, optional-skills/ and optional-mcps/ are bare data
+    directories (no __init__.py), so they are invisible to packages.find and
+    to package-data (which only attaches to a package). They must be declared
+    as setuptools data-files (wheel) AND grafted in MANIFEST.in (sdist).
+
+    The wheel side lives in setup.py — NOT in a ``[tool.setuptools.data-files]``
+    table. That pyproject table *replaces* setup.py's ``data_files`` kwarg
+    instead of merging with it, so declaring only ``locales`` there dropped
+    skills/optional-skills from every wheel (#3415: "Skill 'elidia-agent' not
+    found" on fresh installs). Asserting the absence of the table is the real
+    guard against that regression recurring.
     """
+    # Wheel channel: setup.py DATA_DIRS must enumerate every bare data dir.
+    dirs = _setup_data_dirs()
+    assert dirs is not None, "setup.py must define DATA_DIRS (see #3415)"
+    assert set(dirs) == set(_BUNDLED_DATA_DIRS), (
+        "setup.py DATA_DIRS must enumerate exactly the bare data dirs so the "
+        f"wheel ships them: expected {sorted(_BUNDLED_DATA_DIRS)}, got {sorted(dirs)}"
+    )
+
+    # The pyproject [tool.setuptools.data-files] table overrides setup.py's
+    # data_files kwarg. It must not exist (or it silently drops the rest).
     data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    data_files = data["tool"]["setuptools"].get("data-files", {})
-    assert data_files.get("locales") == ["locales/*.yaml"], (
-        "pyproject [tool.setuptools.data-files] must declare "
-        'locales = ["locales/*.yaml"] so the wheel ships i18n catalogs'
+    assert "data-files" not in data["tool"]["setuptools"], (
+        "pyproject [tool.setuptools.data-files] replaces setup.py data_files "
+        "instead of merging — remove it (bare data dirs belong in setup.py, #3415)"
     )
 
+    # Sdist channel: MANIFEST.in must graft every bare data dir.
     manifest = (REPO_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
-    assert "graft locales" in manifest, (
-        "MANIFEST.in must `graft locales` so the sdist ships i18n catalogs"
-    )
+    for name in _BUNDLED_DATA_DIRS:
+        assert f"graft {name}" in manifest, (
+            f"MANIFEST.in must `graft {name}` so the sdist ships it"
+        )
 
-    # Every on-disk catalog has the .yaml extension the globs above match.
-    on_disk = list((REPO_ROOT / "locales").glob("*.yaml"))
-    assert on_disk, "expected locales/*.yaml catalogs on disk"
+    # Every declared dir must actually have files on disk for the grafts to
+    # match (guards against a rename leaving an empty/no-op graft).
+    for name in _BUNDLED_DATA_DIRS:
+        on_disk = list((REPO_ROOT / name).rglob("*"))
+        assert on_disk, f"expected bundled files under {name}/ on disk"

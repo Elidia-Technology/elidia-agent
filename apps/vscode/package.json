@@ -2,7 +2,7 @@
   "name": "elidia-agent-vscode",
   "displayName": "Elidia Agent",
   "description": "Elidia Agent in VS Code \u2014 chat, explain and fix against your own Elidia backend.",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "publisher": "ElidiaTechnology",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -68,9 +68,53 @@
       {
         "command": "elidia.showLog",
         "title": "Elidia: Show Log"
+      },
+      {
+        "command": "elidia.launchDesktop",
+        "title": "Elidia: Launch Desktop App",
+        "icon": "$(device-desktop)"
+      },
+      {
+        "command": "elidia.launchCli",
+        "title": "Elidia: Launch CLI",
+        "icon": "$(terminal)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "elidia",
+          "title": "Elidia Agent",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "elidia": [
+        {
+          "type": "elidia.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
     "menus": {
+      "view/title": [
+        {
+          "command": "elidia.chat",
+          "when": "view == elidia.chatView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "elidia.launchDesktop",
+          "when": "view == elidia.chatView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "elidia.launchCli",
+          "when": "view == elidia.chatView",
+          "group": "navigation@3"
+        }
+      ],
       "editor/context": [
         {
           "command": "elidia.explain",

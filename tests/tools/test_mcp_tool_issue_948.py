@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-from tools.mcp_tool import MCPServerTask, _format_connect_error, _resolve_stdio_command, _MCP_AVAILABLE
+from tools.mcp_tool import MCPServerTask, _format_connect_error, _resolve_stdio_command, _is_missing_executable_error, _MCP_AVAILABLE
 
 # Ensure the mcp module symbols exist for patching even when the SDK isn't installed
 if not _MCP_AVAILABLE:
@@ -89,6 +89,58 @@ def test_format_connect_error_unwraps_exception_group():
     message = _format_connect_error(error)
 
     assert "missing executable 'node'" in message
+
+
+def test_format_connect_error_hints_uvx_install():
+    error = ExceptionGroup(
+        "unhandled errors in a TaskGroup",
+        [FileNotFoundError(2, "The system cannot find the file specified", "uvx")],
+    )
+
+    message = _format_connect_error(error)
+
+    assert "missing executable 'uvx'" in message
+    assert "install uv" in message
+
+
+def test_format_connect_error_hints_uv_install():
+    error = FileNotFoundError(2, "No such file or directory", "uv")
+
+    message = _format_connect_error(error)
+
+    assert "missing executable 'uv'" in message
+    assert "install uv" in message
+
+
+def test_format_connect_error_no_hint_for_unknown_command():
+    error = FileNotFoundError(2, "No such file or directory", "some-random-cmd")
+
+    message = _format_connect_error(error)
+
+    assert "missing executable 'some-random-cmd'" in message
+    assert "install uv" not in message
+    assert "Node.js" not in message
+
+
+def test_is_missing_executable_error_detects_taskgroup_enonent():
+    error = ExceptionGroup(
+        "unhandled errors in a TaskGroup",
+        [FileNotFoundError(2, "No such file or directory", "uvx")],
+    )
+    assert _is_missing_executable_error(error) is True
+
+
+def test_is_missing_executable_error_detects_nested_cause():
+    inner = FileNotFoundError(2, "No such file or directory", "node")
+    outer = RuntimeError("spawn failed")
+    outer.__cause__ = inner
+    assert _is_missing_executable_error(outer) is True
+
+
+def test_is_missing_executable_error_false_for_other_errors():
+    assert _is_missing_executable_error(ConnectionError("Connection closed")) is False
+    assert _is_missing_executable_error(TimeoutError("timed out")) is False
+    assert _is_missing_executable_error(RuntimeError("boom")) is False
 
 
 def test_run_stdio_uses_resolved_command_and_prepended_path(tmp_path):

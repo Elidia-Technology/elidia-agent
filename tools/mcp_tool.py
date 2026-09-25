@@ -658,30 +658,58 @@ def _resolve_client_cert(server_name: str, config: dict):
     return cert_path
 
 
+def _find_missing_executable(exc: BaseException) -> Optional[str]:
+    """Return the command name if ``exc`` is (or wraps) a missing-executable
+    error, else ``None``.  Walks anyio ``ExceptionGroup``s and the
+    ``__cause__``/``__context__`` chain, mirroring how the MCP SDK nests the
+    ``FileNotFoundError`` raised when ``command`` is not on PATH."""
+    nested = getattr(exc, "exceptions", None)
+    if nested:
+        for child in nested:
+            missing = _find_missing_executable(child)
+            if missing:
+                return missing
+        return None
+    if isinstance(exc, FileNotFoundError):
+        if getattr(exc, "filename", None):
+            return str(exc.filename)
+        match = re.search(r"No such file or directory: '([^']+)'", str(exc))
+        if match:
+            return match.group(1)
+    for attr in ("__cause__", "__context__"):
+        nested_exc = getattr(exc, attr, None)
+        if isinstance(nested_exc, BaseException):
+            missing = _find_missing_executable(nested_exc)
+            if missing:
+                return missing
+    return None
+
+
+def _is_missing_executable_error(exc: BaseException) -> bool:
+    """True when ``exc`` is a missing-command (ENOENT) failure, which is
+    non-retryable: retrying re-raises the identical error after a pointless
+    backoff burn (and can collapse into an opaque timeout)."""
+    return _find_missing_executable(exc) is not None
+
+
+def _missing_executable_hint(basename: str) -> str:
+    """Return one-line guidance for a missing MCP stdio command, or ""."""
+    if basename in {"npx", "npm", "node"}:
+        return (
+            "ensure Node.js is installed and PATH includes its bin directory, "
+            "or set mcp_servers.<name>.command to an absolute path and include "
+            "that directory in mcp_servers.<name>.env.PATH"
+        )
+    if basename in {"uvx", "uv"}:
+        return (
+            "install uv (https://docs.astral.sh/uv/) — e.g. 'pip install uv' or "
+            "'winget install astral-sh.uv' — and make sure its bin directory is on PATH"
+        )
+    return ""
+
+
 def _format_connect_error(exc: BaseException) -> str:
     """Render nested MCP connection errors into an actionable short message."""
-
-    def _find_missing(current: BaseException) -> Optional[str]:
-        nested = getattr(current, "exceptions", None)
-        if nested:
-            for child in nested:
-                missing = _find_missing(child)
-                if missing:
-                    return missing
-            return None
-        if isinstance(current, FileNotFoundError):
-            if getattr(current, "filename", None):
-                return str(current.filename)
-            match = re.search(r"No such file or directory: '([^']+)'", str(current))
-            if match:
-                return match.group(1)
-        for attr in ("__cause__", "__context__"):
-            nested_exc = getattr(current, attr, None)
-            if isinstance(nested_exc, BaseException):
-                missing = _find_missing(nested_exc)
-                if missing:
-                    return missing
-        return None
 
     def _flatten_messages(current: BaseException) -> List[str]:
         nested = getattr(current, "exceptions", None)
@@ -700,15 +728,12 @@ def _format_connect_error(exc: BaseException) -> str:
                 messages.extend(_flatten_messages(nested_exc))
         return messages or [current.__class__.__name__]
 
-    missing = _find_missing(exc)
+    missing = _find_missing_executable(exc)
     if missing:
         message = f"missing executable '{missing}'"
-        if os.path.basename(missing) in {"npx", "npm", "node"}:
-            message += (
-                " (ensure Node.js is installed and PATH includes its bin directory, "
-                "or set mcp_servers.<name>.command to an absolute path and include "
-                "that directory in mcp_servers.<name>.env.PATH)"
-            )
+        hint = _missing_executable_hint(os.path.basename(missing))
+        if hint:
+            message += f" ({hint})"
         return _sanitize_error(message)
 
     deduped: List[str] = []
@@ -1859,6 +1884,19 @@ class MCPServerTask:
             except Exception as exc:
                 self.session = None
 
+                # A missing stdio command (ENOENT) is non-retryable: retrying
+                # re-raises the identical error after a pointless backoff burn
+                # and can collapse into an opaque timeout. Fail fast with the
+                # actionable "missing executable 'X'" message (#3416).
+                if not self._ready.is_set() and _is_missing_executable_error(exc):
+                    logger.warning(
+                        "MCP server '%s' failed: %s",
+                        self.name, _format_connect_error(exc),
+                    )
+                    self._error = exc
+                    self._ready.set()
+                    return
+
                 # If this is the first connection attempt, retry with backoff
                 # before giving up. A transient DNS/network blip at startup
                 # should not permanently kill the server.
@@ -1868,7 +1906,7 @@ class MCPServerTask:
                         logger.warning(
                             "MCP server '%s' failed initial OAuth authentication, "
                             "not retrying automatically: %s",
-                            self.name, exc,
+                            self.name, _format_connect_error(exc),
                         )
                         self._error = exc
                         self._ready.set()
@@ -1879,7 +1917,8 @@ class MCPServerTask:
                         logger.warning(
                             "MCP server '%s' failed initial connection after "
                             "%d attempts, giving up: %s",
-                            self.name, _MAX_INITIAL_CONNECT_RETRIES, exc,
+                            self.name, _MAX_INITIAL_CONNECT_RETRIES,
+                            _format_connect_error(exc),
                         )
                         self._error = exc
                         self._ready.set()
@@ -1889,7 +1928,8 @@ class MCPServerTask:
                         "MCP server '%s' initial connection failed "
                         "(attempt %d/%d), retrying in %.0fs: %s",
                         self.name, initial_retries,
-                        _MAX_INITIAL_CONNECT_RETRIES, backoff, exc,
+                        _MAX_INITIAL_CONNECT_RETRIES, backoff,
+                        _format_connect_error(exc),
                     )
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, _MAX_BACKOFF_SECONDS)

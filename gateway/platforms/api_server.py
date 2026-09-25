@@ -698,6 +698,10 @@ _RESULT_FORWARDING_TOOLS = frozenset({
 # the wire by default.
 _RESULT_FORWARDED_KEYS = (
     "success", "status", "error", "credits_used", "model",
+    # `note` explains any difference between what the user asked for and what
+    # they were billed for. Omitting it left the frontend's note rendering
+    # unreachable (AIUT-3317).
+    "note",
     "action", "url", "name", "description", "tool_slug", "credit_cost",
 )
 

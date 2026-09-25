@@ -235,6 +235,24 @@ def _sanitize_subprocess_env(base_env: dict | None, extra_env: dict | None = Non
     return sanitized
 
 
+def _is_wsl_bash_stub(path: str) -> bool:
+    """Return True when *path* is the WindowsApps App Execution Alias for bash.
+
+    Windows 10/11 ships a ``bash.exe`` alias under
+    ``%LOCALAPPDATA%\\Microsoft\\WindowsApps`` that forwards to WSL. Git for
+    Windows puts only ``Git\\cmd`` on PATH (not ``Git\\bin``), so on a machine
+    with Git for Windows installed but no working WSL distro,
+    ``shutil.which("bash")`` resolves to this WSL stub *first* and spawning it
+    fails with ``WSL (xxxx - Relay) ERROR: ... execvpe(/bin/bash) failed`` plus
+    a non-zero exit code — surfacing as a baffling ``ls -la [exit 1]`` for every
+    terminal call. Detect and skip it so the real Git Bash wins.
+    """
+    if not path:
+        return False
+    normalized = path.replace("\\", "/").lower()
+    return "/windowsapps/" in normalized and normalized.endswith("/bash.exe")
+
+
 def _find_bash() -> str:
     """Find bash for command execution."""
     if not _IS_WINDOWS:
@@ -269,17 +287,26 @@ def _find_bash() -> str:
             if os.path.isfile(candidate):
                 return candidate
 
-    found = shutil.which("bash")
-    if found:
-        return found
-
+    # Prefer a real Git for Windows bash over the WindowsApps WSL stub. Git's
+    # own ``bin`` dir is deliberately NOT on PATH (only ``Git\cmd`` is), so it
+    # must be probed by absolute path here — *before* ``shutil.which("bash")``,
+    # which would otherwise resolve to the WSL stub and break every command.
+    # Include ``usr\bin`` (the real bash.exe) as a fallback to ``bin\bash.exe``
+    # (the Git Bash launcher wrapper).
     for candidate in (
         os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "bin", "bash.exe"),
+        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "usr", "bin", "bash.exe"),
         os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Git", "bin", "bash.exe"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Git", "usr", "bin", "bash.exe"),
         os.path.join(_local_appdata, "Programs", "Git", "bin", "bash.exe"),
+        os.path.join(_local_appdata, "Programs", "Git", "usr", "bin", "bash.exe"),
     ):
         if candidate and os.path.isfile(candidate):
             return candidate
+
+    found = shutil.which("bash")
+    if found and not _is_wsl_bash_stub(found):
+        return found
 
     raise RuntimeError(
         "Git Bash not found. Elidia Agent requires Git for Windows on Windows.\n"

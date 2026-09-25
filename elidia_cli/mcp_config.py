@@ -177,6 +177,7 @@ def _probe_single_server(
         _run_on_mcp_loop,
         _connect_server,
         _stop_mcp_loop,
+        _format_connect_error,
     )
 
     _ensure_mcp_loop()
@@ -198,7 +199,13 @@ def _probe_single_server(
     try:
         _run_on_mcp_loop(_probe(), timeout=connect_timeout + 10)
     except BaseException as exc:
-        raise _unwrap_exception_group(exc) from None
+        # Surface the root cause through the same formatter the runtime uses,
+        # so `elidia mcp test` / the web "test connection" endpoint report
+        # "missing executable 'uvx' (install uv …)" instead of the opaque
+        # "[WinError 2] The system cannot find the file specified" or
+        # "unhandled errors in a TaskGroup". _format_connect_error unwraps
+        # anyio ExceptionGroups itself (see #3416).
+        raise RuntimeError(_format_connect_error(exc)) from None
     finally:
         _stop_mcp_loop()
 
@@ -219,22 +226,6 @@ def _oauth_tokens_present(name: str) -> bool:
         logger.debug("Could not check OAuth tokens for '%s': %s", name, exc)
         # Be permissive on unexpected errors: don't block a real success.
         return True
-
-
-def _unwrap_exception_group(exc: BaseException) -> Exception:
-    """Extract the root-cause exception from anyio TaskGroup wrappers.
-
-    The MCP SDK uses anyio task groups, which wrap errors in
-    ``BaseExceptionGroup`` / ``ExceptionGroup``.  This makes error
-    messages opaque ("unhandled errors in a TaskGroup").  We unwrap
-    to surface the real cause (e.g. "401 Unauthorized").
-    """
-    while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
-        exc = exc.exceptions[0]
-    # Return a plain Exception so callers can catch normally
-    if isinstance(exc, Exception):
-        return exc
-    return RuntimeError(str(exc))
 
 
 # ─── elidia mcp add ──────────────────────────────────────────────────────────

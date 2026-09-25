@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "elidia-agent-cli"
-version = "2.1.0"
+version = "2.2.0"
 description = "Multi-platform AI agent for the terminal and messaging apps — part of the AiUtils.io ecosystem, powered by Elidia Technology"
 readme = "README.md"
 # Upper bound is load-bearing, not cosmetic. uv resolves the project's
@@ -264,15 +264,10 @@ elidia-acp = "acp_adapter.entry:main"
 [tool.setuptools]
 py-modules = ["run_agent", "model_tools", "toolsets", "batch_runner", "trajectory_compressor", "toolset_distributions", "cli", "elidia_bootstrap", "elidia_constants", "elidia_state", "elidia_time", "elidia_logging", "utils", "mcp_serve"]
 
-[tool.setuptools.data-files]
-# i18n catalogs. locales/ is a bare data directory (no __init__.py), so it is
-# neither a package (packages.find) nor package-data (which attaches to a
-# package). data-files ships it in the wheel; MANIFEST.in `graft locales`
-# ships it in the sdist. Without this, sealed installs (pip wheel, Nix store
-# venv) drop the catalogs and gateway/CLI commands surface raw i18n keys like
-# `gateway.reset.header_default` (#27632, #35374, #23943).
-locales = ["locales/*.yaml"]
-
+# NOTE: bare data directories (locales/, skills/, optional-skills/,
+# optional-mcps/) are declared as data-files in setup.py, NOT here. A
+# [tool.setuptools.data-files] table REPLACES setup.py's data_files kwarg
+# rather than merging, so the two must never coexist — see #3415.
 [tool.setuptools.package-data]
 elidia_cli = ["web_dist/**/*", "tui_dist/**/*", "assets/*", "scripts/install.sh", "scripts/install.ps1"]
 gateway = ["assets/**/*"]

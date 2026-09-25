@@ -27,6 +27,7 @@ Usage:
 
 import os
 import re
+import fnmatch
 import difflib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -1633,6 +1634,24 @@ class ShellFileOperations(FileOperations):
             )
         )
 
+    def _is_local_backend(self) -> bool:
+        """Return True iff this FileOperations targets the host filesystem.
+
+        Pure-Python search fallbacks (pathlib/os.walk) are only valid on the
+        local backend — on remote/sandboxed backends (Docker, Modal, SSH,
+        Daytona) the files live inside the sandbox where the host Python
+        process cannot reach them, so a local walk would silently search the
+        wrong filesystem.
+        """
+        env = getattr(self, "env", None)
+        if env is None:
+            return False
+        try:
+            from tools.environments.local import LocalEnvironment
+        except Exception:  # noqa: BLE001
+            return False
+        return isinstance(env, LocalEnvironment)
+
     def _lsp_local_only(self) -> bool:
         """Return True iff this FileOperations is wired to a local backend.
 
@@ -1889,6 +1908,11 @@ class ShellFileOperations(FileOperations):
 
         # Fallback: find (slower, no .gitignore awareness)
         if not self._has_command('find'):
+            # Neither rg nor Unix find is available (e.g. Windows without
+            # Git Bash).  On a local backend we can still search with a
+            # pure-Python walk; remote backends keep the actionable error.
+            if self._is_local_backend():
+                return self._search_files_python(search_pattern, path, limit, offset)
             return SearchResult(
                 error="File search requires 'rg' (ripgrep) or 'find'. "
                       "Install ripgrep for best results: "
@@ -1949,6 +1973,54 @@ class ShellFileOperations(FileOperations):
             total_count=len(files)
         )
 
+    def _search_files_python(self, pattern: str, path: str, limit: int, offset: int) -> SearchResult:
+        """Pure-Python file-name search fallback for the local backend.
+
+        Used when neither ripgrep nor Unix ``find`` is available (e.g. Windows
+        without Git Bash).  Walks the tree, matches basenames by glob or
+        case-insensitive substring, skips hidden directories, and sorts by
+        modification time (newest first) to mirror ``rg --files --sortr=modified``.
+        """
+        root = Path(path)
+        if not root.exists():
+            return SearchResult(error=f"Search path not found: {path}", total_count=0)
+
+        has_glob = any(ch in pattern for ch in "*?[")
+        if has_glob:
+            def matcher(name: str) -> bool:
+                return fnmatch.fnmatch(name, pattern)
+        else:
+            lower = pattern.lower()
+            def matcher(name: str) -> bool:
+                return lower in name.lower()
+
+        matched: List[tuple] = []
+        try:
+            for dirpath, dirnames, filenames in os.walk(root):
+                # Skip hidden directories (matches rg/find default behaviour).
+                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                for fname in filenames:
+                    if not matcher(fname):
+                        continue
+                    fp = Path(dirpath) / fname
+                    try:
+                        mtime = fp.stat().st_mtime
+                    except OSError:
+                        mtime = 0.0
+                    matched.append((mtime, str(fp)))
+        except OSError as exc:
+            return SearchResult(error=f"Search failed: {exc}", total_count=0)
+
+        # Newest first; path as a deterministic tie-breaker.
+        matched.sort(key=lambda t: (-t[0], t[1]))
+        all_files = [p for _, p in matched]
+        page = all_files[offset:offset + limit]
+        return SearchResult(
+            files=page,
+            total_count=len(all_files),
+            truncated=len(all_files) > offset + limit,
+        )
+
     def _search_files_rg(self, pattern: str, path: str, limit: int, offset: int) -> SearchResult:
         """Search for files by name using ripgrep's --files mode.
 
@@ -2004,11 +2076,100 @@ class ShellFileOperations(FileOperations):
                                           output_mode, context)
         else:
             # Neither rg nor grep available (Windows without Git Bash, etc.)
+            if self._is_local_backend():
+                return self._search_content_python(pattern, path, file_glob, limit,
+                                                   offset, output_mode, context)
             return SearchResult(
                 error="Content search requires ripgrep (rg) or grep. "
                       "Install ripgrep: https://github.com/BurntSushi/ripgrep#installation"
             )
     
+    def _search_content_python(self, pattern: str, path: str, file_glob: Optional[str],
+                               limit: int, offset: int, output_mode: str, context: int) -> SearchResult:
+        """Pure-Python content search fallback for the local backend.
+
+        Used when neither ripgrep nor grep is available (e.g. Windows without
+        Git Bash).  Walks the tree, regex-matches each text file's lines, and
+        honours the same output modes as the rg/grep paths.
+        """
+        root = Path(path)
+        if not root.exists():
+            return SearchResult(error=f"Search path not found: {path}", total_count=0)
+
+        try:
+            compiled = re.compile(pattern)
+        except re.error as exc:
+            return SearchResult(error=f"Invalid search pattern: {exc}", total_count=0)
+
+        # Candidate files: walk the tree, skip hidden dirs, apply the file glob,
+        # and drop known-binary extensions up front.
+        candidates: List[Path] = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            for fname in filenames:
+                if file_glob and not fnmatch.fnmatch(fname, file_glob):
+                    continue
+                fp = Path(dirpath) / fname
+                if fp.suffix.lower() in BINARY_EXTENSIONS:
+                    continue
+                candidates.append(fp)
+
+        files_with_matches: List[str] = []
+        counts: Dict[str, int] = {}
+        # Ordered (path, line_number) -> SearchMatch to dedupe context lines.
+        matches_by_key: Dict[tuple, SearchMatch] = {}
+
+        for fp in candidates:
+            try:
+                if fp.stat().st_size > 10 * 1024 * 1024:
+                    continue
+                raw = fp.read_bytes()
+            except OSError:
+                continue
+            if b"\x00" in raw[:8192]:
+                continue  # binary
+            text = raw.decode("utf-8", errors="replace")
+            lines = text.splitlines()
+
+            hit_lines = [(i, line) for i, line in enumerate(lines, start=1)
+                         if compiled.search(line)]
+            if not hit_lines:
+                continue
+
+            if output_mode == "files_only":
+                files_with_matches.append(str(fp))
+                continue
+            if output_mode == "count":
+                counts[str(fp)] = len(hit_lines)
+                continue
+
+            # Content mode: emit each match line plus requested context lines.
+            for ln, line in hit_lines:
+                matches_by_key.setdefault((str(fp), ln),
+                                          SearchMatch(path=str(fp), line_number=ln, content=line[:500]))
+                if context > 0:
+                    lo = max(1, ln - context)
+                    hi = min(len(lines), ln + context)
+                    for cln in range(lo, hi + 1):
+                        if cln == ln:
+                            continue
+                        matches_by_key.setdefault(
+                            (str(fp), cln),
+                            SearchMatch(path=str(fp), line_number=cln, content=lines[cln - 1][:500]),
+                        )
+
+        if output_mode == "files_only":
+            total = len(files_with_matches)
+            return SearchResult(files=files_with_matches[offset:offset + limit],
+                                total_count=total, truncated=total > offset + limit)
+        if output_mode == "count":
+            return SearchResult(counts=counts, total_count=sum(counts.values()))
+
+        all_matches = list(matches_by_key.values())
+        total = len(all_matches)
+        return SearchResult(matches=all_matches[offset:offset + limit],
+                            total_count=total, truncated=total > offset + limit)
+
     def _search_with_rg(self, pattern: str, path: str, file_glob: Optional[str],
                         limit: int, offset: int, output_mode: str, context: int) -> SearchResult:
         """Search using ripgrep."""

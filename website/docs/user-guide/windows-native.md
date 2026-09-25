@@ -108,12 +108,14 @@ Elidia's terminal tool runs commands through **Git Bash**, same strategy Claude 
 Resolution order for `bash.exe`:
 
 1. `ELIDIA_GIT_BASH_PATH` environment variable if set.
-2. `%LOCALAPPDATA%\elidia\git\usr\bin\bash.exe` (installer-managed PortableGit).
-3. `%LOCALAPPDATA%\elidia\git\bin\bash.exe` (older Git-for-Windows layout).
-4. System Git-for-Windows install (`%ProgramFiles%\Git\bin\bash.exe`, etc.).
-5. MSYS2, Cygwin, or any `bash.exe` on PATH as a last resort.
+2. `%LOCALAPPDATA%\elidia\git\bin\bash.exe` (installer-managed PortableGit).
+3. `%LOCALAPPDATA%\elidia\git\usr\bin\bash.exe` (MinGit fallback).
+4. System Git-for-Windows install (`%ProgramFiles%\Git\bin\bash.exe`, then `usr\bin`, then x86, then per-user `%LOCALAPPDATA%\Programs\Git`).
+5. MSYS2, Cygwin, or any other `bash.exe` on PATH as a last resort.
 
 The installer sets `ELIDIA_GIT_BASH_PATH` explicitly so fresh PowerShell sessions don't have to re-discover. Override it if you want Elidia to use a specific bash — for example, your system Git Bash or a WSL-hosted bash via a symlink.
+
+**Pitfall — the WindowsApps WSL alias.** Windows ships an App Execution Alias named `bash.exe` under `%LOCALAPPDATA%\Microsoft\WindowsApps` that forwards to WSL. When Git for Windows is installed, only `Git\cmd` is on PATH (not `Git\bin`), so that alias sorts *ahead* of the real Git Bash and would be picked up by the step-5 PATH lookup. On a machine with no working WSL distro the alias fails with `WSL (xxxx - Relay) ERROR: … execvpe(/bin/bash) failed` and every terminal command surfaces as `[exit 1]`. Elidia skips this alias and prefers the real Git Bash (steps 2–4), so the fix is simply to have Git for Windows installed — or set `ELIDIA_GIT_BASH_PATH` explicitly.
 
 **Pitfall:** MinGit's layout is different from the full Git-for-Windows installer — bash lives under `usr\bin\bash.exe`, not `bin\bash.exe`. Elidia checks both. If you're manually unpacking a MinGit zip, make sure you pick the **non-busybox** variant (`MinGit-*-64-bit.zip`, not `MinGit-*-busybox*.zip`) — busybox builds ship `ash` instead of `bash` and most coreutils are missing.
 

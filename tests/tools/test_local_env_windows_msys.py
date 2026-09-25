@@ -18,12 +18,17 @@ and ``os.path.isdir`` so the MSYS path tests as "missing" exactly like
 on the real OS.
 """
 
+import os
+
 from unittest.mock import patch
 
+import pytest
 
 from tools.environments import local as local_mod
 from tools.environments.local import (
     LocalEnvironment,
+    _find_bash,
+    _is_wsl_bash_stub,
     _msys_to_windows_path,
     _resolve_safe_cwd,
 )
@@ -68,6 +73,79 @@ class TestMsysToWindowsPath:
     def test_empty_string(self, monkeypatch):
         monkeypatch.setattr(local_mod, "_IS_WINDOWS", True)
         assert _msys_to_windows_path("") == ""
+
+
+# ---------------------------------------------------------------------------
+# _is_wsl_bash_stub — WindowsApps WSL alias detection
+# ---------------------------------------------------------------------------
+
+class TestIsWslBashStub:
+    def test_detects_windowsapps_stub(self):
+        stub = r"C:\Users\ADMIN\AppData\Local\Microsoft\WindowsApps\bash.exe"
+        assert _is_wsl_bash_stub(stub) is True
+        # Forward-slash form (e.g. from shutil.which on a mixed-separator PATH)
+        assert _is_wsl_bash_stub(stub.replace("\\", "/")) is True
+
+    def test_rejects_real_git_bash(self):
+        assert _is_wsl_bash_stub(r"C:\Program Files\Git\bin\bash.exe") is False
+        assert _is_wsl_bash_stub(r"C:\Program Files\Git\usr\bin\bash.exe") is False
+
+    def test_rejects_empty_and_other_bash(self):
+        assert _is_wsl_bash_stub("") is False
+        assert _is_wsl_bash_stub(None) is False
+        assert _is_wsl_bash_stub(r"C:\msys64\usr\bin\bash.exe") is False
+
+
+# ---------------------------------------------------------------------------
+# _find_bash — Windows resolution must prefer real Git Bash over the WSL stub
+# ---------------------------------------------------------------------------
+
+class TestFindBashWindows:
+    def test_prefers_program_files_git_over_wsl_stub(self, monkeypatch):
+        r"""#3414: Git for Windows is installed but only ``Git\cmd`` is on PATH,
+        so ``shutil.which("bash")`` returns the WindowsApps WSL stub. ``_find_bash``
+        must probe the Program Files Git bash *before* consulting ``shutil.which``
+        and return the real bash."""
+        monkeypatch.setattr(local_mod, "_IS_WINDOWS", True)
+        monkeypatch.delenv("ELIDIA_GIT_BASH_PATH", raising=False)
+
+        # Build the candidate the same way _find_bash does (os.path.join uses
+        # "/" on Linux CI, "\" on Windows), so the fake isfile matches the
+        # exact path the function probes.
+        real_bash = os.path.join(r"C:\Program Files", "Git", "bin", "bash.exe")
+        wsl_stub = r"C:\Users\ADMIN\AppData\Local\Microsoft\WindowsApps\bash.exe"
+
+        def fake_isfile(path):
+            return path == real_bash
+
+        with patch.object(local_mod.shutil, "which", return_value=wsl_stub), \
+             patch.object(local_mod.os.path, "isfile", side_effect=fake_isfile):
+            assert _find_bash() == real_bash
+
+    def test_skips_wsl_stub_and_raises_when_no_real_bash(self, monkeypatch):
+        """When only the WSL stub exists (no Git Bash anywhere), ``_find_bash``
+        must NOT return the stub — it must raise the actionable Git Bash error."""
+        monkeypatch.setattr(local_mod, "_IS_WINDOWS", True)
+        monkeypatch.delenv("ELIDIA_GIT_BASH_PATH", raising=False)
+
+        wsl_stub = r"C:\Users\ADMIN\AppData\Local\Microsoft\WindowsApps\bash.exe"
+
+        with patch.object(local_mod.shutil, "which", return_value=wsl_stub), \
+             patch.object(local_mod.os.path, "isfile", return_value=False):
+            with pytest.raises(RuntimeError, match="Git Bash not found"):
+                _find_bash()
+
+    def test_returns_non_wsl_which_bash(self, monkeypatch):
+        """A non-WSL bash found via PATH (e.g. MSYS2) is still acceptable when
+        no Program Files Git exists."""
+        monkeypatch.setattr(local_mod, "_IS_WINDOWS", True)
+        monkeypatch.delenv("ELIDIA_GIT_BASH_PATH", raising=False)
+
+        msys_bash = r"C:\msys64\usr\bin\bash.exe"
+
+        with patch.object(local_mod.shutil, "which", return_value=msys_bash), \
+             patch.object(local_mod.os.path, "isfile", return_value=False):
+            assert _find_bash() == msys_bash
 
 
 # ---------------------------------------------------------------------------

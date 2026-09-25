@@ -48,6 +48,17 @@ export function renderChatHtml(cspSource: string, assets: ChatAssets): string {
   }
   .hint:hover { color: var(--vscode-foreground); border-color: var(--vscode-focusBorder); }
 
+  /* Standalone-surface launchers: real buttons, not hint chips, so the empty
+     state can also install or open the Desktop app and the CLI. */
+  #launchers { margin-top: 18px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .launch {
+    display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px;
+    font-size: 11.5px; font-weight: 500; cursor: pointer;
+    color: var(--vscode-button-foreground); background: var(--vscode-button-background);
+    border: none; border-radius: 6px;
+  }
+  .launch:hover { background: var(--vscode-button-hoverBackground); }
+
   .turn { margin-bottom: 16px; animation: rise .18s ease-out; }
   @keyframes rise { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) {
@@ -144,6 +155,10 @@ export function renderChatHtml(cspSource: string, assets: ChatAssets): string {
         <span class="hint">Find the bug in my selection</span>
         <span class="hint">Write tests for this</span>
       </div>
+      <div id="launchers">
+        <button type="button" class="launch" id="launch-desktop">Open Desktop App</button>
+        <button type="button" class="launch" id="launch-cli">Open CLI</button>
+      </div>
     </div>
   </div>
   <div id="meta"><span id="state"></span><span id="hintkeys">Enter to send · Shift+Enter for a new line</span></div>
@@ -222,6 +237,11 @@ export function renderChatHtml(cspSource: string, assets: ChatAssets): string {
 
   document.querySelectorAll('.hint').forEach(h =>
     h.addEventListener('click', () => { input.value = h.textContent; input.focus() }))
+
+  document.getElementById('launch-desktop')?.addEventListener('click', () =>
+    vscode.postMessage({ type: 'launchDesktop' }))
+  document.getElementById('launch-cli')?.addEventListener('click', () =>
+    vscode.postMessage({ type: 'launchCli' }))
 
   document.getElementById('stop').addEventListener('click', () =>
     vscode.postMessage({ type: 'cancel' }))

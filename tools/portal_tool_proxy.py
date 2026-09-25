@@ -122,6 +122,38 @@ def _map_arguments(gateway_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     return mapped
 
 
+# Must exceed the portal's worst-case media call. The portal allows FAL up to
+# 300s for video and 3D, then bills and re-uploads to the CDN (itself up to
+# 180s for a video download) before replying. A matching 300s here gave zero
+# margin: the gateway gave up exactly while the portal was still charging, and
+# the request fell through to local execution, so the user was charged and got
+# nothing, then charged again on the agent's retry (AIUT-3317).
+_PORTAL_TOOL_TIMEOUT_SECONDS = float(
+    os.getenv("ELIDIA_PORTAL_TOOL_TIMEOUT_SECONDS", "600")
+)
+
+
+def _portal_failed(gateway_name: str, reason: str) -> str:
+    """Report a portal-side failure instead of falling back to local execution.
+
+    Returning ``None`` here hands the call to the agent's local dispatcher.
+    On the hosted gateway that path has no FAL credentials, so it fails
+    confusingly — and worse, the portal may already have charged for a
+    generation whose result we timed out waiting for. Re-running it would
+    charge a second time. An explicit failure stops that: the agent reports it
+    and does not silently retry a paid operation.
+    """
+    logger.warning("Portal tool %s failed, not falling back locally: %s",
+                   gateway_name, reason)
+    return json.dumps({
+        "success": False,
+        "error": (
+            f"The media service could not complete this request ({reason}). "
+            "It may still have been charged — check your usage before retrying."
+        ),
+    }, indent=2)
+
+
 def _format_result(gateway_name: str, portal_result: Dict[str, Any]) -> str:
     """Convert portal API response to the format the agent expects."""
     if portal_result.get("status") == "error":
@@ -159,6 +191,14 @@ def _format_result(gateway_name: str, portal_result: Dict[str, Any]) -> str:
         model = portal_result.get("model")
         if model:
             payload["model"] = model
+        # The portal sets `note` whenever it changed what the user asked for —
+        # a duration snapped to what the model accepts, or fewer images than
+        # requested. Dropping it here meant a user billed for an 8s video they
+        # asked to be 5s got no explanation, and the agent could not give one
+        # because it never saw the note either (AIUT-3317).
+        note = portal_result.get("note")
+        if note:
+            payload["note"] = note
         return json.dumps(payload, indent=2)
 
     if gateway_name == "image_generate":
@@ -229,7 +269,7 @@ def maybe_proxy_tool(
     import httpx
 
     try:
-        with httpx.Client(timeout=300.0) as client:
+        with httpx.Client(timeout=_PORTAL_TOOL_TIMEOUT_SECONDS) as client:
             resp = client.post(url, json=payload, headers=headers)
 
         if resp.status_code == 402:
@@ -243,7 +283,10 @@ def maybe_proxy_tool(
                 "Portal tool proxy failed: HTTP %s — %s",
                 resp.status_code, resp.text[:300],
             )
-            return None
+            return _portal_failed(
+                function_name,
+                f"the media service returned HTTP {resp.status_code}",
+            )
 
         portal_result = resp.json()
         return _format_result(function_name, portal_result)
@@ -253,7 +296,7 @@ def maybe_proxy_tool(
             "Portal tool proxy error for %s: %s", function_name, exc,
             exc_info=True,
         )
-        return None
+        return _portal_failed(function_name, str(exc)[:200])
 
 
 def fetch_media_models() -> Optional[Dict[str, Any]]:

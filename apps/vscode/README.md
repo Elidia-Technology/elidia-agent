@@ -31,6 +31,12 @@ restarting the agent or losing the conversation.
 
 **Switch models.** Pick from whatever models your Elidia install offers.
 
+**Open it from the activity bar.** Elidia adds its own icon to the left
+activity bar, opening a chat sidebar in place — the same way you reach Claude
+Code, Cline, or Copilot. From the empty state (or the sidebar's title bar) you
+can also launch the standalone **Desktop app** or the **CLI**; each opens its
+download page if it is not installed yet.
+
 ## Requirements
 
 ```bash
@@ -55,6 +61,8 @@ window closes.
 | `Elidia: Cancel Current Turn` | — | Stops what the agent is doing |
 | `Elidia: Restart Agent` | — | Restarts the agent process |
 | `Elidia: Show Log` | — | Opens the Elidia output channel |
+| `Elidia: Launch Desktop App` | — | Opens the standalone Desktop app (or its download page) |
+| `Elidia: Launch CLI` | — | Opens the CLI in a terminal (or its download page) |
 
 ## Settings
 

@@ -39,6 +39,7 @@ Welcome to the Elidia Agent documentation. These guides are also published on th
 ## Platform-specific
 
 - [Termux](termux.md) — running Elidia on Android
+- [Troubleshooting — Windows / macOS / Linux](troubleshooting-windows.md) — shell, MCP, skills, and permissions fixes
 
 ## Additional references
 

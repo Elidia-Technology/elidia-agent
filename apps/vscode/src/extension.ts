@@ -14,12 +14,17 @@ import * as vscode from 'vscode'
 
 import { AcpClient, AcpUnavailableError } from './acp'
 import { renderChatHtml } from './chatView'
+import { launchCli, launchDesktop } from './launcher'
 
 let client: AcpClient | null = null
 let sessionId: string | null = null
 let output: vscode.OutputChannel
 let status: vscode.StatusBarItem
 let chatPanel: vscode.WebviewPanel | null = null
+// The activity-bar sidebar view. Chat streams to every open surface so the
+// answer appears wherever the developer is looking; the panel and the view are
+// independent, and either may be open on its own.
+let chatView: vscode.WebviewView | null = null
 // Captured at activation. openChatPanel needs it to build webview URIs for the
 // banner and avatar, and a webview cannot load anything from disk without a
 // localResourceRoots entry derived from it.
@@ -31,6 +36,50 @@ function config() {
 
 function workspaceCwd(): string {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()
+}
+
+/** Post a message to every open chat surface (the panel and/or the sidebar). */
+function postToChat(message: unknown): void {
+  chatPanel?.webview.postMessage(message)
+  chatView?.webview.postMessage(message)
+}
+
+/**
+ * Render the chat surface for one webview. Panel and sidebar share the same
+ * markup; only the webview that asks for its own `asWebviewUri` gets its own
+ * origin, so the artwork is built per-webview rather than cached.
+ */
+function chatHtml(webview: vscode.Webview): string {
+  const mediaUri = (file: string) =>
+    webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', file)).toString()
+  return renderChatHtml(webview.cspSource, {
+    bannerLight: mediaUri('banner-light.png'),
+    bannerDark: mediaUri('banner-dark.png'),
+    mark: mediaUri('elidia-mark.png')
+  })
+}
+
+/**
+ * One handler for messages from the panel and the sidebar view alike. A single
+ * handler keeps the two surfaces from drifting apart.
+ */
+async function handleChatMessage(message: any): Promise<void> {
+  if (message?.type === 'send' && typeof message.text === 'string' && message.text.trim()) {
+    try {
+      await ask(message.text.trim(), false)
+    } catch (err) {
+      await reportError(err)
+    }
+  } else if (message?.type === 'cancel') {
+    if (client?.running && sessionId) {
+      client.notify('session/cancel', { sessionId })
+      output.appendLine('cancel requested')
+    }
+  } else if (message?.type === 'launchDesktop') {
+    vscode.window.showInformationMessage(`Elidia: ${await launchDesktop()}`)
+  } else if (message?.type === 'launchCli') {
+    vscode.window.showInformationMessage(`Elidia: ${await launchCli()}`)
+  }
 }
 
 /**
@@ -82,13 +131,13 @@ function handleNotification(method: string, params: any): void {
     typeof block === 'string' ? block : (block?.text ?? '')
 
   if (kind.includes('agent_message_chunk')) {
-    chatPanel?.webview.postMessage({ type: 'chunk', text: textOf(update.content) })
+    postToChat({ type: 'chunk', text: textOf(update.content) })
   } else if (kind.includes('agent_thought_chunk')) {
-    chatPanel?.webview.postMessage({ type: 'thought', text: textOf(update.content) })
+    postToChat({ type: 'thought', text: textOf(update.content) })
   } else if (kind.includes('tool_call')) {
     const title = update?.title ?? update?.toolCallId ?? 'tool'
     const statusText = update?.status ?? ''
-    chatPanel?.webview.postMessage({ type: 'tool', text: `${title} ${statusText}`.trim() })
+    postToChat({ type: 'tool', text: `${title} ${statusText}`.trim() })
   }
 }
 
@@ -164,28 +213,8 @@ function openChatPanel(): vscode.WebviewPanel {
       localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
     }
   )
-  const mediaUri = (file: string) =>
-    chatPanel!.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', file)).toString()
-
-  chatPanel.webview.html = renderChatHtml(chatPanel.webview.cspSource, {
-    bannerLight: mediaUri('banner-light.png'),
-    bannerDark: mediaUri('banner-dark.png'),
-    mark: mediaUri('elidia-mark.png')
-  })
-  chatPanel.webview.onDidReceiveMessage(async message => {
-    if (message?.type === 'send' && typeof message.text === 'string' && message.text.trim()) {
-      try {
-        await ask(message.text.trim(), false)
-      } catch (err) {
-        await reportError(err)
-      }
-    } else if (message?.type === 'cancel') {
-      if (client?.running && sessionId) {
-        client.notify('session/cancel', { sessionId })
-        output.appendLine('cancel requested')
-      }
-    }
-  })
+  chatPanel.webview.html = chatHtml(chatPanel.webview)
+  chatPanel.webview.onDidReceiveMessage(handleChatMessage)
   chatPanel.onDidDispose(() => {
     chatPanel = null
   })
@@ -195,9 +224,12 @@ function openChatPanel(): vscode.WebviewPanel {
 /** Send a prompt; replies arrive as streamed notifications. */
 async function ask(prompt: string, echo = true): Promise<void> {
   const acp = await ensureClient()
-  const panel = openChatPanel()
-  if (echo) panel.webview.postMessage({ type: 'user', text: prompt })
-  panel.webview.postMessage({ type: 'start' })
+  // A send from the sidebar view must not yank the full panel open. Only open
+  // one when no surface exists yet (explain/fix, or a command fired with the
+  // panel and view both closed).
+  if (!chatPanel && !chatView) openChatPanel()
+  if (echo) postToChat({ type: 'user', text: prompt })
+  postToChat({ type: 'start' })
 
   try {
     await acp.request('session/prompt', {
@@ -205,7 +237,23 @@ async function ask(prompt: string, echo = true): Promise<void> {
       prompt: [{ type: 'text', text: prompt }]
     })
   } finally {
-    panel.webview.postMessage({ type: 'end' })
+    postToChat({ type: 'end' })
+  }
+}
+
+/** The activity-bar sidebar: a persistent chat view that opens EA v2 in place. */
+class ChatViewProvider implements vscode.WebviewViewProvider {
+  resolveWebviewView(view: vscode.WebviewView): void {
+    chatView = view
+    view.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
+    }
+    view.webview.html = chatHtml(view.webview)
+    view.webview.onDidReceiveMessage(handleChatMessage)
+    view.onDidDispose(() => {
+      chatView = null
+    })
   }
 }
 
@@ -216,6 +264,12 @@ export function activate(context: vscode.ExtensionContext): void {
   status.command = 'elidia.chat'
   status.tooltip = 'Elidia Agent'
   context.subscriptions.push(output, status)
+
+  // The activity-bar icon resolves to this view, so clicking it opens a chat
+  // sidebar in place — the same affordance Claude Code / Cline / Copilot give.
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('elidia.chatView', new ChatViewProvider())
+  )
 
   const register = (id: string, run: () => Promise<void>) =>
     context.subscriptions.push(
@@ -294,6 +348,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
   register('elidia.showLog', async () => {
     output.show(true)
+  })
+
+  register('elidia.launchDesktop', async () => {
+    vscode.window.showInformationMessage(`Elidia: ${await launchDesktop()}`)
+  })
+
+  register('elidia.launchCli', async () => {
+    vscode.window.showInformationMessage(`Elidia: ${await launchCli()}`)
   })
 }
 

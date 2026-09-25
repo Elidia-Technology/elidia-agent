@@ -151,6 +151,7 @@ All documentation lives at **[aiutils.io/elidia](https://aiutils.io/elidia)** an
 | [Contributing](docs/contributing.md)                                       | Development setup, PR process, code style                  |
 | [CLI Reference](docs/cli-commands.md)                                      | All commands and flags                                     |
 | [Environment Variables](docs/environment-variables.md)                     | Complete env var reference                                 |
+| [Troubleshooting — Windows / macOS / Linux](docs/troubleshooting-windows.md) | Shell, MCP, skills, and permissions fixes                 |
 
 ---
 
