@@ -585,6 +585,18 @@ def _resolve_api_key_provider_secret(
             pass
         return "", ""
 
+    if provider_id == "aiutils":
+        # The AiUtils Developer API key (Elidia Portal) may live only in the OS
+        # keychain: `elidia key store` / `elidia auth add elidia` put it there
+        # and deliberately keep it out of the environment (B13). Resolve it with
+        # the same precedence the tools use (session → keychain → environment)
+        # so chat and tools never bill different keys. Read into this variable,
+        # never exported.
+        from elidia_cli import key_store
+        shared_key = (key_store.load() or "").strip()
+        if has_usable_secret(shared_key):
+            return shared_key, key_store.source()
+
     from elidia_cli.config import get_env_value
     for env_var in pconfig.api_key_env_vars:
         # Check both os.environ and ~/.elidia/.env file

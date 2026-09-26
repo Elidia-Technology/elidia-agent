@@ -205,7 +205,7 @@ def test_elidia_adapter_retry_credential_skips_non_401(tmp_path, monkeypatch):
 def test_elidia_adapter_get_credential_raises_when_not_logged_in(tmp_path, monkeypatch):
     monkeypatch.setenv("ELIDIA_HOME", str(tmp_path))
     adapter = ElidiaPortalAdapter()
-    with pytest.raises(RuntimeError, match="elidia auth add elidia"):
+    with pytest.raises(RuntimeError, match="AiUtils Developer API key"):
         adapter.get_credential()
 
 

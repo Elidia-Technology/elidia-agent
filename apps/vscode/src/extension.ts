@@ -12,7 +12,7 @@
  */
 import * as vscode from 'vscode'
 
-import { AcpClient, AcpUnavailableError } from './acp'
+import { ACP_INSTALL_COMMAND, AcpClient, AcpUnavailableError } from './acp'
 import { renderChatHtml } from './chatView'
 import { launchCli, launchDesktop } from './launcher'
 
@@ -180,9 +180,19 @@ async function ensureClient(): Promise<AcpClient> {
 async function reportError(err: unknown): Promise<void> {
   const message = err instanceof Error ? err.message : String(err)
   output.appendLine(`error: ${message}`)
-  const actions = err instanceof AcpUnavailableError ? ['Show Log'] : ['Show Log']
+  postToChat({ type: 'error', text: message })
+  const copyInstall = 'Copy Install Command'
+  const launchApp = 'Launch Desktop App'
+  const actions = err instanceof AcpUnavailableError ? [copyInstall, launchApp, 'Show Log'] : ['Show Log']
   const choice = await vscode.window.showErrorMessage(`Elidia: ${message}`, ...actions)
-  if (choice === 'Show Log') output.show(true)
+  if (choice === 'Show Log') {
+    output.show(true)
+  } else if (choice === copyInstall) {
+    await vscode.env.clipboard.writeText(ACP_INSTALL_COMMAND)
+    vscode.window.showInformationMessage(`Elidia: copied \`${ACP_INSTALL_COMMAND}\` — run it in a terminal, then use Elidia: Restart Agent.`)
+  } else if (choice === launchApp) {
+    vscode.window.showInformationMessage(`Elidia: ${await launchDesktop()}`)
+  }
 }
 
 function selectionContext(): { text: string; language: string; file: string } | null {
@@ -262,7 +272,11 @@ export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel('Elidia Agent')
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
   status.command = 'elidia.chat'
-  status.tooltip = 'Elidia Agent'
+  status.tooltip = 'Elidia Agent: open chat'
+  // Visible from activation so a fresh install has an obvious way in; the
+  // agent itself starts on demand when the chat is used.
+  status.text = '$(comment-discussion) Elidia'
+  status.show()
   context.subscriptions.push(output, status)
 
   // The activity-bar icon resolves to this view, so clicking it opens a chat
@@ -283,8 +297,10 @@ export function activate(context: vscode.ExtensionContext): void {
     )
 
   register('elidia.chat', async () => {
-    await ensureClient()
+    // Open the chat first: if the agent cannot start, the window still appears
+    // and the reason is shown inside it instead of only in a toast.
     openChatPanel()
+    await ensureClient()
   })
 
   register('elidia.explain', async () => {

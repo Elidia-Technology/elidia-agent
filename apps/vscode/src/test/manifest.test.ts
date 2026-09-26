@@ -31,13 +31,14 @@ test('the activity-bar icon file exists on disk', () => {
 test('a chat view is contributed under the container', () => {
   const views = manifest.contributes?.views?.elidia ?? []
   assert.ok(
-    views.some((v: any) => v.type === 'elidia.chatView'),
-    'no view of type elidia.chatView under the elidia container'
+    views.some((v: any) => v.type === 'webview' && v.id === 'elidia.chatView'),
+    'no webview view with id elidia.chatView under the elidia container'
   )
 })
 
 test('the view type matches the registered provider id', () => {
   // The id here is what extension.ts registers with registerWebviewViewProvider.
   const views = manifest.contributes?.views?.elidia ?? []
-  assert.ok(views.some((v: any) => v.type === 'elidia.chatView'))
+  // VS Code binds a webview view by its `id`; `type` must be 'webview'.
+  assert.ok(views.some((v: any) => v.type === 'webview' && v.id === 'elidia.chatView'))
 })

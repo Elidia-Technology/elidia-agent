@@ -1,69 +1,74 @@
 """``elidia portal`` — the human-readable entry point for Elidia Portal.
 
 Running ``elidia portal`` with no subcommand performs the one-shot Portal
-onboarding: OAuth login, pick an Elidia model, switch the inference provider to
-Elidia, and offer to enable the Tool Gateway. It is the friendly alias for
-``elidia auth add elidia --type oauth`` (which still works), is identical to
-``elidia setup --portal``, and runs the same Elidia flow as the first-time quick
-setup.
+onboarding: store an AiUtils Developer API key (``ak-dev-…``, kept in the OS
+keychain — same as ``elidia key store``), pick a model, and switch the inference
+provider to the AiUtils Developer API. It is identical to
+``elidia setup --portal`` and runs the same flow as the first-time quick setup.
+The Portal's former OAuth device-code login no longer exists (AIUT-3434).
 
 Subcommands:
   (none)   Log in to Elidia Portal + set it up (one-shot onboarding).
   login    Explicit alias for the default one-shot onboarding.
   info     Show Portal auth state + which Tool Gateway tools are routed.
-  open     Open the Portal subscription page in the user's default browser.
+  open     Open the Portal API-keys page in the user's default browser.
   tools    List Tool Gateway tools and which are active in the current config.
 
 This command is intentionally minimal — it does not duplicate functionality
 already in ``elidia auth`` or ``elidia tools``. It's the onboarding + discovery
-surface for the Portal subscription itself.
+surface for the Portal itself.
 """
 from __future__ import annotations
 
+import logging
 import sys
 import webbrowser
 
 from elidia_cli.colors import Colors, color
 from elidia_cli.config import load_config
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_PORTAL_URL = "https://developer.aiutils.io"
-SUBSCRIPTION_URL = "https://developer.aiutils.io/manage-subscription"
+API_KEYS_URL = "https://developer.aiutils.io/api-keys"
 DOCS_URL = "https://aiutils.io/elidia/user-guide/features/tool-gateway"
 
 
 def _cmd_status(args) -> int:
-    """Show Portal auth + Tool Gateway routing summary."""
-    from elidia_cli.auth import get_elidia_auth_status
+    """Show Portal auth (AiUtils Developer API key) + Tool Gateway routing summary."""
+    logger.debug("Entered into _cmd_status")
+    from elidia_cli.auth import PROVIDER_REGISTRY, _resolve_api_key_provider_secret
     from elidia_cli.elidia_subscription import get_elidia_subscription_features
 
     config = load_config() or {}
 
+    pconfig = PROVIDER_REGISTRY["aiutils"]
     try:
-        auth = get_elidia_auth_status() or {}
+        key, key_source = _resolve_api_key_provider_secret("aiutils", pconfig)
     except Exception:
-        auth = {}
+        key, key_source = "", ""
 
-    logged_in = bool(auth.get("logged_in"))
+    logged_in = bool(key)
 
     print()
     print(color("  Elidia Portal", Colors.MAGENTA))
     print(color("  ───────────", Colors.MAGENTA))
     if logged_in:
-        portal = auth.get("portal_base_url") or DEFAULT_PORTAL_URL
-        print(f"  Auth:    {color('✓ logged in', Colors.GREEN)}")
-        print(f"  Portal:  {portal}")
-        inference = auth.get("inference_base_url")
-        if inference:
-            print(f"  API:     {inference}")
+        print(
+            f"  Auth:    {color('✓ AiUtils Developer API key', Colors.GREEN)}"
+            f" {key[:8]}… ({key_source})"
+        )
+        print(f"  Portal:  {DEFAULT_PORTAL_URL}")
+        print(f"  API:     {pconfig.inference_base_url}")
     else:
-        print(f"  Auth:    {color('not logged in', Colors.YELLOW)}")
-        print(f"  Sign up: {SUBSCRIPTION_URL}")
+        print(f"  Auth:    {color('no AiUtils Developer API key', Colors.YELLOW)}")
+        print(f"  Get key: {API_KEYS_URL}")
         print(f"  Login:   elidia portal")
 
     # Provider selection (independent of auth)
     model_cfg = config.get("model") if isinstance(config.get("model"), dict) else {}
     provider = str(model_cfg.get("provider") or "").strip().lower()
-    if provider == "elidia":
+    if provider in ("aiutils", "elidia"):
         print(f"  Model:   {color('✓ using Elidia as inference provider', Colors.GREEN)}")
     elif provider:
         print(f"  Model:   currently {provider} (switch with `elidia model`)")
@@ -104,8 +109,8 @@ def _cmd_status(args) -> int:
 
 
 def _cmd_open(args) -> int:
-    """Open the Portal subscription page in the default browser."""
-    target = SUBSCRIPTION_URL
+    """Open the Portal API-keys page in the default browser."""
+    target = API_KEYS_URL
     print(f"Opening {target}")
     try:
         opened = webbrowser.open(target)
@@ -162,19 +167,21 @@ def _cmd_tools(args) -> int:
         print(f"  {label:<{label_width}}  partner: {partner:<14} {state}")
 
     print()
-    print(color(f"  Manage your subscription: {SUBSCRIPTION_URL}", Colors.DIM))
+    print(color(f"  Manage your API keys: {API_KEYS_URL}", Colors.DIM))
     print(color(f"  Docs: {DOCS_URL}", Colors.DIM))
     return 0
 
 
 def _cmd_login(args) -> int:
-    """Run the one-shot Elidia Portal onboarding (login + model + provider + tools).
+    """Run the one-shot Elidia Portal onboarding (API key + model + provider).
 
-    This is the human-readable front door for `elidia auth add elidia --type
-    oauth`. It reuses the exact wiring behind `elidia setup --portal` (which in
+    It reuses the exact wiring behind `elidia setup --portal` (which in
     turn runs the same Elidia flow as the first-time quick setup), so the
-    commands stay in lockstep: device-code login, pick an Elidia model, switch the
-    inference provider to Elidia, then offer the Tool Gateway opt-in.
+    commands stay in lockstep: store the AiUtils Developer API key, pick a
+    model, and switch the inference provider to the AiUtils Developer API.
+
+    Login means storing an AiUtils Developer API key, the same key
+    `elidia auth add elidia` and `elidia key store` save.
     """
     from elidia_cli.setup import _run_portal_one_shot
 
@@ -192,9 +199,9 @@ def portal_command(args) -> int:
     """Top-level dispatch for `elidia portal <subcommand>`."""
     sub = getattr(args, "portal_command", None)
     if sub in {None, "", "login"}:
-        # Default to the one-shot onboarding — `elidia portal` is the
-        # human-readable alias for `elidia auth add elidia --type oauth` /
-        # `elidia setup --portal`.
+        # Default to the one-shot onboarding — equivalent to
+        # `elidia setup --portal`; authenticates with an AiUtils Developer API
+        # key (see elidia_cli.key_cli), never OAuth.
         return _cmd_login(args)
     if sub in {"info", "status"}:
         # `status` kept as a back-compat alias for the prior default.
@@ -216,8 +223,8 @@ def add_parser(subparsers) -> None:
         description=(
             "Run `elidia portal` with no subcommand to log in to Elidia Portal "
             "and set it up — pick a model, set Elidia as your provider, and offer "
-            "the Tool Gateway (the human-readable alias for `elidia auth add "
-            "elidia --type oauth`, identical to `elidia setup --portal`). "
+            "the Tool Gateway (identical to `elidia setup --portal`; signs in "
+            "with an AiUtils Developer API key). "
             "Subcommands: login (default), info, open, tools."
         ),
     )

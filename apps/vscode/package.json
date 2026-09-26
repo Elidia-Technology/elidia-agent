@@ -2,7 +2,7 @@
   "name": "elidia-agent-vscode",
   "displayName": "Elidia Agent",
   "description": "Elidia Agent in VS Code \u2014 chat, explain and fix against your own Elidia backend.",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "publisher": "ElidiaTechnology",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -92,7 +92,8 @@
     "views": {
       "elidia": [
         {
-          "type": "elidia.chatView",
+          "type": "webview",
+          "id": "elidia.chatView",
           "name": "Chat"
         }
       ]
@@ -151,11 +152,13 @@
     "watch": "tsc -watch -p .",
     "lint": "eslint src --ext ts",
     "test": "node --test out/test/*.test.js",
-    "package": "npx --yes @vscode/vsce package --no-dependencies"
+    "package": "npx --yes @vscode/vsce package --no-dependencies",
+    "test:integration": "npm run compile && node out/test/integration/runTest.js"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^3.1.0",
     "typescript": "^5.6.0"
   }
 }

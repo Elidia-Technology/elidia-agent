@@ -206,3 +206,6 @@ known_hosts
 id_rsa
 id_ed25519
 *.ppk
+
+# VS Code extension integration-test cache (@vscode/test-electron)
+apps/vscode/.vscode-test/

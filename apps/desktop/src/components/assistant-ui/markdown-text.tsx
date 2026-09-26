@@ -23,6 +23,7 @@ import {
   mediaPathFromMarkdownHref,
   mediaStreamUrl
 } from '@/lib/media'
+import { useMermaidPlugin } from '@/lib/mermaid'
 import { previewTargetFromMarkdownHref } from '@/lib/preview-targets'
 import { cn } from '@/lib/utils'
 
@@ -289,8 +290,10 @@ function MarkdownTextSurface({ containerClassName, containerProps }: MarkdownTex
 
   // Keep code parsing enabled while streaming so incomplete fenced blocks still
   // render as code cards. The expensive Shiki pass is deferred by
-  // `SyntaxHighlighter` below when `isStreaming` is true.
-  const plugins = useMemo(() => ({ math: mathPlugin, code }), [])
+  // `SyntaxHighlighter` below when `isStreaming` is true. ```mermaid fences
+  // render as diagrams (strict security, theme follows light/dark).
+  const mermaid = useMermaidPlugin()
+  const plugins = useMemo(() => ({ math: mathPlugin, code, mermaid }), [mermaid])
 
   const components = useMemo(
     () =>

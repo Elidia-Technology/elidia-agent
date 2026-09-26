@@ -98,7 +98,10 @@ class ElidiaPortalAdapter(UpstreamAdapter):
             state = self._read_state()
             if state is None:
                 raise RuntimeError(
-                    "Not logged into Elidia Portal. Run `elidia auth add elidia` first."
+                    "No Elidia Portal OAuth session. Elidia Portal now authenticates "
+                    "with an AiUtils Developer API key (provider `aiutils`, set up "
+                    "with `elidia portal` or `elidia key store`); this OAuth proxy "
+                    "upstream is no longer served."
                 )
 
             try:
@@ -129,7 +132,8 @@ class ElidiaPortalAdapter(UpstreamAdapter):
             if not runtime_key:
                 raise RuntimeError(
                     "Elidia Portal refresh did not return a usable inference JWT. "
-                    "Try `elidia auth add elidia` to re-authenticate."
+                    "The Portal's OAuth upstream is retired: use an AiUtils "
+                    "Developer API key instead (`elidia portal` or `elidia key store`)."
                 )
 
             base_url = (

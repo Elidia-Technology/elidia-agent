@@ -270,95 +270,42 @@ def test_codex_provider_replaces_incompatible_default_model(monkeypatch):
     assert shell.model == "gpt-5.2-codex"
 
 
-def test_model_flow_elidia_prints_subscription_guidance_without_mutating_explicit_tts(monkeypatch, capsys):
-    monkeypatch.setattr(
-        "elidia_cli.elidia_subscription.managed_elidia_tools_enabled",
-        lambda *args, **kwargs: True,
-    )
+def test_model_flow_elidia_uses_api_key_flow_without_touching_tool_config(monkeypatch):
+    """Elidia Portal authenticates with an AiUtils Developer API key (AIUT-3434).
+
+    A stale OAuth session must not route to the dead device-code endpoint, and
+    choosing the provider must not rewrite the user's explicit tool settings.
+    """
     config = {
         "model": {"provider": "elidia", "default": "claude-opus-4-6"},
         "tts": {"provider": "elevenlabs"},
         "browser": {"cloud_provider": "browser-use"},
     }
-
     monkeypatch.setattr(
         "elidia_cli.auth.get_provider_auth_state",
-        lambda provider: {"access_token": "elidia-token"},
+        lambda provider: {"access_token": "legacy-oauth-token"},
     )
     monkeypatch.setattr(
-        "elidia_cli.auth.resolve_elidia_runtime_credentials",
-        lambda *args, **kwargs: {
-            "base_url": "https://inference.example.com/v1",
-            "api_key": "elidia-key",
-        },
+        "elidia_cli.auth._resolve_api_key_provider_secret",
+        lambda provider_id, pconfig: ("ak-dev-existingkey01", "os-keychain"),
     )
+
+    def _no_oauth(*args, **kwargs):
+        raise AssertionError("Elidia Portal must not start an OAuth login")
+
+    monkeypatch.setattr("elidia_cli.auth._login_elidia", _no_oauth)
+    calls = []
     monkeypatch.setattr(
-        "elidia_cli.auth.fetch_elidia_models",
-        lambda *args, **kwargs: ["claude-opus-4-6"],
+        elidia_main,
+        "_model_flow_api_key_provider",
+        lambda cfg, provider_id, current_model="": calls.append((provider_id, current_model)),
     )
-    monkeypatch.setattr("elidia_cli.auth._prompt_model_selection", lambda model_ids, current_model="", pricing=None, **kw: "claude-opus-4-6")
-    monkeypatch.setattr("elidia_cli.auth._save_model_choice", lambda model: None)
-    monkeypatch.setattr("elidia_cli.auth._update_config_for_provider", lambda provider, url: None)
 
     elidia_main._model_flow_elidia(config, current_model="claude-opus-4-6")
 
-    out = capsys.readouterr().out
-    assert "Default model set to:" in out
+    assert calls == [("aiutils", "claude-opus-4-6")]
     assert config["tts"]["provider"] == "elevenlabs"
     assert config["browser"]["cloud_provider"] == "browser-use"
-
-
-def test_model_flow_elidia_offers_tool_gateway_prompt_when_unconfigured(monkeypatch, capsys):
-    from elidia_cli.elidia_account import ElidiaPortalAccountInfo
-
-    # Entitled account (paid → all tools eligible) drives the offer; the prompt
-    # is a per-tool checklist now, so capture the call rather than scrape stdout.
-    monkeypatch.setattr(
-        "elidia_cli.elidia_subscription.get_elidia_portal_account_info",
-        lambda **kwargs: ElidiaPortalAccountInfo(
-            logged_in=True,
-            source="account_api",
-            fresh=True,
-            paid_service_access=True,
-        ),
-    )
-    captured = {}
-
-    def _fake_checklist(title, items, pre_selected=None):
-        captured["title"] = title
-        captured["items"] = list(items)
-        return []  # decline; we only assert the prompt was offered
-
-    monkeypatch.setattr("elidia_cli.setup.prompt_checklist", _fake_checklist, raising=False)
-
-    config = {
-        "model": {"provider": "elidia", "default": "claude-opus-4-6"},
-        "tts": {"provider": "edge"},
-    }
-
-    monkeypatch.setattr(
-        "elidia_cli.auth.get_provider_auth_state",
-        lambda provider: {"access_token": "***"},
-    )
-    monkeypatch.setattr(
-        "elidia_cli.auth.resolve_elidia_runtime_credentials",
-        lambda *args, **kwargs: {
-            "base_url": "https://inference.example.com/v1",
-            "api_key": "***",
-        },
-    )
-    monkeypatch.setattr(
-        "elidia_cli.auth.fetch_elidia_models",
-        lambda *args, **kwargs: ["claude-opus-4-6"],
-    )
-    monkeypatch.setattr("elidia_cli.auth._prompt_model_selection", lambda model_ids, current_model="", pricing=None, **kw: "claude-opus-4-6")
-    monkeypatch.setattr("elidia_cli.auth._save_model_choice", lambda model: None)
-    monkeypatch.setattr("elidia_cli.auth._update_config_for_provider", lambda provider, url: None)
-    elidia_main._model_flow_elidia(config, current_model="claude-opus-4-6")
-
-    # The per-tool Tool Gateway checklist was offered.
-    assert "title" in captured
-    assert "Tool Gateway" in captured["title"] or "tool pool" in captured["title"].lower()
 
 
 def test_codex_provider_uses_config_model(monkeypatch):
@@ -626,7 +573,9 @@ def test_model_flow_custom_persists_selected_api_mode(monkeypatch):
     assert captured_provider["api_mode"] == "codex_responses"
 
 
-def test_cmd_model_forwards_elidia_login_tls_options(monkeypatch):
+def test_cmd_model_elidia_uses_api_key_flow_not_oauth_login(monkeypatch):
+    """`elidia model` → Elidia Portal must never reach the OAuth login, even
+    when OAuth-era flags (portal URL, client id, TLS options) are passed."""
     monkeypatch.setattr(elidia_main, "_require_tty", lambda *a: None)
     monkeypatch.setattr(
         "elidia_cli.config.load_config",
@@ -638,20 +587,21 @@ def test_cmd_model_forwards_elidia_login_tls_options(monkeypatch):
     monkeypatch.setattr("elidia_cli.auth.resolve_provider", lambda requested, **kwargs: "elidia")
     monkeypatch.setattr("elidia_cli.auth.get_provider_auth_state", lambda provider_id: None)
     monkeypatch.setattr(elidia_main, "_prompt_provider_choice", lambda choices, **kwargs: 0)
+    monkeypatch.setattr(
+        "elidia_cli.auth._resolve_api_key_provider_secret",
+        lambda provider_id, pconfig: ("ak-dev-existingkey01", "os-keychain"),
+    )
 
-    captured = {}
+    def _no_oauth(*args, **kwargs):
+        raise AssertionError("Elidia Portal must not start an OAuth login")
 
-    def _fake_login(login_args, provider_config):
-        captured["portal_url"] = login_args.portal_url
-        captured["inference_url"] = login_args.inference_url
-        captured["client_id"] = login_args.client_id
-        captured["scope"] = login_args.scope
-        captured["no_browser"] = login_args.no_browser
-        captured["timeout"] = login_args.timeout
-        captured["ca_bundle"] = login_args.ca_bundle
-        captured["insecure"] = login_args.insecure
-
-    monkeypatch.setattr("elidia_cli.auth._login_elidia", _fake_login)
+    monkeypatch.setattr("elidia_cli.auth._login_elidia", _no_oauth)
+    calls = []
+    monkeypatch.setattr(
+        elidia_main,
+        "_model_flow_api_key_provider",
+        lambda cfg, provider_id, current_model="": calls.append(provider_id),
+    )
 
     elidia_main.cmd_model(
         SimpleNamespace(
@@ -666,16 +616,7 @@ def test_cmd_model_forwards_elidia_login_tls_options(monkeypatch):
         )
     )
 
-    assert captured == {
-        "portal_url": "https://developer.aiutils.io",
-        "inference_url": "https://inference.aiutils.io/v1",
-        "client_id": "elidia-local",
-        "scope": "openid profile",
-        "no_browser": True,
-        "timeout": 7.5,
-        "ca_bundle": "/tmp/local-ca.pem",
-        "insecure": True,
-    }
+    assert calls == ["aiutils"]
 
 
 # ---------------------------------------------------------------------------

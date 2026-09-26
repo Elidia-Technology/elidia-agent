@@ -77,22 +77,22 @@ class TestSafetyBoundaries:
     into advice."""
 
     def test_medical_skill_refuses_to_diagnose(self):
-        text = (SKILLS_DIR / "medical-research" / "SKILL.md").read_text()
+        text = (SKILLS_DIR / "aiutils-medical-research" / "SKILL.md").read_text()
         assert "does not diagnose" in text
         assert "seek immediate medical care" in text, "must handle urgent presentations"
 
     def test_legal_skill_states_it_is_not_advice(self):
-        text = (SKILLS_DIR / "legal-analysis" / "SKILL.md").read_text()
+        text = (SKILLS_DIR / "aiutils-legal-analysis" / "SKILL.md").read_text()
         assert "not legal advice" in text
         assert "Never fabricate case law" in text
 
     def test_generation_skills_require_cost_confirmation(self):
         """Generation is billed; the user should not learn the price afterwards."""
-        for name in ("image-generation", "video-generation", "audio-generation"):
+        for name in ("aiutils-image-generation", "aiutils-video-generation", "aiutils-audio-generation"):
             text = (SKILLS_DIR / name / "SKILL.md").read_text()
             assert "aiutils_estimate" in text, f"{name} must estimate before spending"
 
     def test_knowledge_base_states_it_is_free(self):
         """Users otherwise assume ingest is billed and avoid using it."""
-        text = (SKILLS_DIR / "knowledge-base" / "SKILL.md").read_text()
+        text = (SKILLS_DIR / "aiutils-knowledge-base" / "SKILL.md").read_text()
         assert "Free" in text or "free" in text

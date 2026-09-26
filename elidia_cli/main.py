@@ -3320,222 +3320,33 @@ def _model_flow_openrouter(config, current_model=""):
 
 
 def _model_flow_elidia(config, current_model="", args=None):
-    """Elidia Portal provider: ensure logged in, then pick model."""
-    from elidia_cli.auth import (
-        get_provider_auth_state,
-        _prompt_model_selection,
-        _save_model_choice,
-        _update_config_for_provider,
-        resolve_elidia_runtime_credentials,
-        AuthError,
-        format_auth_error,
-        _login_elidia,
-        PROVIDER_REGISTRY,
-    )
-    from elidia_cli.config import (
-        get_env_value,
-        load_config,
-        save_config,
-        save_env_value,
-    )
-    from elidia_cli.elidia_subscription import prompt_enable_tool_gateway
+    """Elidia Portal: authenticate with an AiUtils Developer API key, then pick a model.
 
-    state = get_provider_auth_state("elidia")
-    if not state or not state.get("access_token"):
-        print("Not logged into Elidia Portal. Starting login...")
+    The Portal issues ``ak-dev-*`` Developer API keys (https://developer.aiutils.io)
+    served by the ``aiutils`` provider. Its former OAuth device-code endpoint does
+    not exist (HTTP 405), so this flow never starts an OAuth login. ``args`` is
+    accepted for the callers that still pass their parsed CLI flags.
+    """
+    logger.debug(f"Entered into _model_flow_elidia: current_model={current_model!r}")
+    from elidia_cli import key_cli, key_store
+    from elidia_cli.auth import PROVIDER_REGISTRY, _resolve_api_key_provider_secret
+
+    existing_key, _source = _resolve_api_key_provider_secret(
+        "aiutils", PROVIDER_REGISTRY["aiutils"]
+    )
+    if not existing_key:
+        print("Elidia Portal uses an AiUtils Developer API key (ak-dev-…).")
+        print("Create one at https://developer.aiutils.io/api-keys")
         print()
-        try:
-            mock_args = argparse.Namespace(
-                portal_url=getattr(args, "portal_url", None),
-                inference_url=getattr(args, "inference_url", None),
-                client_id=getattr(args, "client_id", None),
-                scope=getattr(args, "scope", None),
-                no_browser=bool(getattr(args, "no_browser", False)),
-                timeout=getattr(args, "timeout", None) or 15.0,
-                ca_bundle=getattr(args, "ca_bundle", None),
-                insecure=bool(getattr(args, "insecure", False)),
-            )
-            _login_elidia(mock_args, PROVIDER_REGISTRY["elidia"])
-            # Offer Tool Gateway enablement for paid subscribers
-            try:
-                _refreshed = load_config() or {}
-                prompt_enable_tool_gateway(_refreshed)
-            except Exception:
-                pass
-        except SystemExit:
-            print("Login cancelled or failed.")
-            return
-        except Exception as exc:
-            print(f"Login failed: {exc}")
-            return
-        # login_elidia already handles model selection + config update
-        return
+        if key_store.backend_available():
+            # Validates the ak-dev- format and keeps the key in the OS keychain,
+            # out of the environment every agent subprocess inherits (B13).
+            if key_cli.cmd_key_store(argparse.Namespace(key=None)) != 0:
+                return
+        # Without a keychain, the generic flow below prompts for the key and
+        # saves it to ~/.elidia/.env.
 
-    # Already logged in — use curated model list (same as OpenRouter defaults).
-    # The live /models endpoint returns hundreds of models; the curated list
-    # shows only agentic models users recognize from OpenRouter.
-    from elidia_cli.models import (
-        get_curated_elidia_model_ids,
-        get_pricing_for_provider,
-        check_elidia_free_tier,
-        partition_elidia_models_by_tier,
-        union_with_portal_free_recommendations,
-        union_with_portal_paid_recommendations,
-    )
-
-    model_ids = get_curated_elidia_model_ids()
-    if not model_ids:
-        print("No curated models available for Elidia Portal.")
-        return
-
-    # Verify credentials are still valid (catches expired sessions early)
-    try:
-        creds = resolve_elidia_runtime_credentials()
-    except Exception as exc:
-        relogin = isinstance(exc, AuthError) and exc.relogin_required
-        msg = format_auth_error(exc) if isinstance(exc, AuthError) else str(exc)
-        if relogin:
-            print(f"Session expired: {msg}")
-            print("Re-authenticating with Elidia Portal...\n")
-            try:
-                mock_args = argparse.Namespace(
-                    portal_url=None,
-                    inference_url=None,
-                    client_id=None,
-                    scope=None,
-                    no_browser=False,
-                    timeout=15.0,
-                    ca_bundle=None,
-                    insecure=False,
-                )
-                _login_elidia(mock_args, PROVIDER_REGISTRY["elidia"])
-            except Exception as login_exc:
-                print(f"Re-login failed: {login_exc}")
-            return
-        print(f"Could not verify credentials: {msg}")
-        return
-
-    # Fetch live pricing (non-blocking — returns empty dict on failure)
-    pricing = get_pricing_for_provider("elidia")
-
-    # Force fresh account data for model selection so recent credit purchases
-    # are reflected immediately.
-    free_tier = check_elidia_free_tier(force_fresh=True)
-    if not free_tier:
-        try:
-            refreshed_creds = resolve_elidia_runtime_credentials(
-                force_refresh=True,
-            )
-            if refreshed_creds:
-                creds = refreshed_creds
-        except Exception:
-            # Runtime inference has its own paid-entitlement recovery path; do
-            # not block model selection if this opportunistic refresh fails.
-            pass
-
-    # Resolve portal URL early — needed both for upgrade links and for the
-    # freeRecommendedModels endpoint below.
-    _elidia_portal_url = ""
-    try:
-        _elidia_state = get_provider_auth_state("elidia")
-        if _elidia_state:
-            _elidia_portal_url = _elidia_state.get("portal_base_url", "")
-    except Exception:
-        pass
-
-    # For free users: partition models into selectable/unavailable based on
-    # whether they are free per the Portal-reported pricing.  First augment
-    # with the Portal's freeRecommendedModels list so newly-launched free
-    # models show up even if this CLI build's hardcoded curated list and
-    # docs-hosted manifest haven't caught up yet.
-    #
-    # For paid users: mirror the same idea with paidRecommendedModels so
-    # newly-launched paid models surface in the picker too — independent
-    # of CLI release cadence.
-    unavailable_models: list[str] = []
-    unavailable_message = ""
-    if free_tier:
-        try:
-            from elidia_cli.elidia_account import (
-                format_elidia_portal_entitlement_message,
-                get_elidia_portal_account_info,
-            )
-
-            _account_info = get_elidia_portal_account_info(force_fresh=True)
-            unavailable_message = (
-                format_elidia_portal_entitlement_message(
-                    _account_info,
-                    capability="paid Elidia models",
-                )
-                or ""
-            )
-        except Exception:
-            unavailable_message = ""
-        model_ids, pricing = union_with_portal_free_recommendations(
-            model_ids, pricing, _elidia_portal_url,
-        )
-        model_ids, unavailable_models = partition_elidia_models_by_tier(
-            model_ids, pricing, free_tier=True
-        )
-    else:
-        model_ids, pricing = union_with_portal_paid_recommendations(
-            model_ids, pricing, _elidia_portal_url,
-        )
-
-    if not model_ids and not unavailable_models:
-        print("No models available for Elidia Portal after filtering.")
-        return
-
-    if free_tier and not model_ids:
-        print("No free models currently available.")
-        if unavailable_models:
-            from elidia_cli.auth import DEFAULT_ELIDIA_PORTAL_URL
-
-            _url = (_elidia_portal_url or DEFAULT_ELIDIA_PORTAL_URL).rstrip("/")
-            print(unavailable_message or f"Upgrade at {_url} to access paid models.")
-        return
-
-    print(
-        f'Showing {len(model_ids)} curated models — use "Enter custom model name" for others.'
-    )
-
-    selected = _prompt_model_selection(
-        model_ids,
-        current_model=current_model,
-        pricing=pricing,
-        unavailable_models=unavailable_models,
-        portal_url=_elidia_portal_url,
-        unavailable_message=unavailable_message,
-    )
-    if selected:
-        _save_model_choice(selected)
-        # Reactivate Elidia as the provider and update config
-        inference_url = creds.get("base_url", "")
-        _update_config_for_provider("elidia", inference_url)
-        current_model_cfg = config.get("model")
-        if isinstance(current_model_cfg, dict):
-            model_cfg = dict(current_model_cfg)
-        elif isinstance(current_model_cfg, str) and current_model_cfg.strip():
-            model_cfg = {"default": current_model_cfg.strip()}
-        else:
-            model_cfg = {}
-        model_cfg["provider"] = "elidia"
-        model_cfg["default"] = selected
-        if inference_url and inference_url.strip():
-            model_cfg["base_url"] = inference_url.rstrip("/")
-        else:
-            model_cfg.pop("base_url", None)
-        config["model"] = model_cfg
-        # Clear any custom endpoint that might conflict
-        if get_env_value("OPENAI_BASE_URL"):
-            save_env_value("OPENAI_BASE_URL", "")
-            save_env_value("OPENAI_API_KEY", "")
-        save_config(config)
-        print(f"Default model set to: {selected} (via Elidia Portal)")
-        # Offer Tool Gateway enablement for paid subscribers
-        prompt_enable_tool_gateway(config)
-    else:
-        print("No change.")
+    _model_flow_api_key_provider(config, "aiutils", current_model)
 
 
 def _model_flow_openai_codex(config, current_model=""):
@@ -5336,6 +5147,25 @@ def _prompt_api_key(pconfig, existing_key: str, provider_id: str = "") -> tuple:
             return LMSTUDIO_NOAUTH_PLACEHOLDER
         return entered
 
+    def _save_key(new_key: str) -> bool:
+        """Persist *new_key*. The AiUtils Developer API key is validated and kept
+        in the OS keychain when one exists (B13), so chat and tools share it."""
+        if provider_id != "aiutils":
+            save_env_value(key_env, new_key)
+            return True
+        from elidia_cli import key_store
+        ok, problem = key_store.validate(new_key)
+        if not ok:
+            print(f"  Not saved: {problem}")
+            return False
+        if key_store.backend_available():
+            stored, problem = key_store.store(new_key)
+            if stored:
+                return True
+            print(f"  {problem} Saving to ~/.elidia/.env instead.")
+        save_env_value(key_env, new_key)
+        return True
+
     # First-time entry ────────────────────────────────────────────────────
     if not existing_key:
         print(f"No {pconfig.name} API key configured.")
@@ -5345,7 +5175,8 @@ def _prompt_api_key(pconfig, existing_key: str, provider_id: str = "") -> tuple:
         if not new_key:
             print("Cancelled.")
             return "", True
-        save_env_value(key_env, new_key)
+        if not _save_key(new_key):
+            return "", True
         print("API key saved.")
         print()
         return new_key, False
@@ -5371,13 +5202,19 @@ def _prompt_api_key(pconfig, existing_key: str, provider_id: str = "") -> tuple:
             print("  No change.")
             print()
             return existing_key, False
-        save_env_value(key_env, new_key)
+        if not _save_key(new_key):
+            print("  No change.")
+            print()
+            return existing_key, False
         print("  API key updated.")
         print()
         return new_key, False
 
     if choice.startswith("c"):
         save_env_value(key_env, "")
+        if provider_id == "aiutils":
+            from elidia_cli import key_store
+            key_store.delete()
         print(
             f"  API key cleared.  Re-run `elidia setup` to configure {pconfig.name} again."
         )
@@ -5917,6 +5754,10 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
         existing_key = get_env_value(ev) or os.getenv(ev, "")
         if existing_key:
             break
+    if not existing_key and provider_id == "aiutils":
+        # The AiUtils Developer API key may live only in the OS keychain.
+        from elidia_cli.auth import _resolve_api_key_provider_secret
+        existing_key, _ = _resolve_api_key_provider_secret(provider_id, pconfig)
 
     existing_key, abort = _prompt_api_key(
         pconfig, existing_key, provider_id=provider_id

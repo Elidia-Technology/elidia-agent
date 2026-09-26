@@ -89,6 +89,10 @@ export function renderChatHtml(cspSource: string, assets: ChatAssets): string {
     border-left-style: dashed;
   }
 
+  /* Agent start-up or request failures, shown where the user is looking. */
+  .turn.error .role { color: var(--vscode-errorForeground); }
+  .turn.error .body { border-left-color: var(--vscode-errorForeground); white-space: pre-wrap; }
+
   .caret::after {
     content: '▌'; margin-left: 1px; opacity: .7;
     animation: blink 1.1s step-end infinite;
@@ -266,6 +270,13 @@ export function renderChatHtml(cspSource: string, assets: ChatAssets): string {
       case 'tool':
         addTurn('tool', m.text, 'meta')
         state.textContent = m.text
+        break
+      case 'error':
+        if (liveBody) liveBody.classList.remove('caret')
+        liveBody = null
+        addTurn('error', m.text, 'error')
+        document.body.classList.remove('busy')
+        state.textContent = ''
         break
       case 'end':
         if (liveBody) liveBody.classList.remove('caret')

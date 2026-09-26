@@ -34,32 +34,6 @@ client = TestClient(app)
 HEADERS = {"X-Elidia-Session-Token": _SESSION_TOKEN}
 
 
-def _fake_elidia_device_data():
-    return {
-        "device_code": "device-code",
-        "user_code": "ELIDIA-1234",
-        "verification_uri": "https://developer.aiutils.io/device",
-        "verification_uri_complete": (
-            "https://developer.aiutils.io/device?user_code=ELIDIA-1234"
-        ),
-        "expires_in": 600,
-        "interval": 5,
-    }
-
-
-def _invoke_scope_refusal():
-    request = httpx.Request("POST", "https://developer.aiutils.io/oauth/device/code")
-    response = httpx.Response(
-        400,
-        json={
-            "error": "invalid_scope",
-            "error_description": "unsupported scope inference:invoke",
-        },
-        request=request,
-    )
-    return httpx.HTTPStatusError("invalid scope", request=request, response=response)
-
-
 def test_minimax_login_does_not_launch_anthropic_flow():
     """Click 'Login' on MiniMax → MUST NOT return claude.ai auth_url."""
     fake_user_code_resp = {
@@ -100,50 +74,51 @@ def test_minimax_login_does_not_launch_anthropic_flow():
     assert body["expires_in"] == 600
 
 
-def test_elidia_dashboard_device_flow_ignores_legacy_scope_override(monkeypatch):
-    from elidia_cli import auth as auth_mod
+def test_oauth_catalog_no_longer_lists_elidia():
+    """AIUT-3434: Elidia Portal has no OAuth device-code identity server —
+    the dashboard must never advertise it as an OAuth-connectable provider.
+    """
+    resp = client.get("/api/providers/oauth", headers=HEADERS)
+    assert resp.status_code == 200, resp.text
+    ids = {p["id"] for p in resp.json()["providers"]}
+    assert "elidia" not in ids
+    # Sanity: the other device-code providers are still listed.
+    assert {"openai-codex", "minimax-oauth"} <= ids
+
+
+def test_starting_elidia_oauth_returns_clear_4xx_not_dead_endpoint_error():
+    """Clicking 'Connect' on Elidia in the dashboard must fail immediately
+    with an explanatory 4xx, never proxy through to the dead device-code
+    endpoint (which 405s) or surface a 500.
+    """
+    resp = client.post("/api/providers/oauth/elidia/start", headers=HEADERS)
+    assert resp.status_code in (400, 404), resp.text
+    assert resp.status_code < 500
+    detail = resp.json()["detail"].lower()
+    assert "api key" in detail
+    assert "oauth" in detail
+
+
+def test_disconnect_elidia_returns_api_key_guidance():
+    """DELETE on the Elidia Portal OAuth slot must explain the API-key flow,
+    not a generic 'unknown provider' error.
+    """
+    resp = client.delete("/api/providers/oauth/elidia", headers=HEADERS)
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"].lower()
+    assert "api key" in detail
+
+
+def test_start_device_code_flow_rejects_elidia_directly():
+    """The internal helper itself must not have an "elidia" branch — calling
+    it directly (bypassing the route-level guard) must still fail cleanly
+    rather than silently hitting the dead device-code endpoint.
+    """
     from elidia_cli import web_server as ws
 
-    requested_scopes = []
-
-    def fake_request_device_code(**kwargs):
-        requested_scopes.append(kwargs["scope"])
-        return _fake_elidia_device_data()
-
-    monkeypatch.setenv("ELIDIA_AGENT_USE_LEGACY_SESSION_KEYS", "true")
-    monkeypatch.setattr(auth_mod, "_request_device_code", fake_request_device_code)
-    monkeypatch.setattr(ws, "_elidia_poller", lambda sid: None)
-
-    result = asyncio.run(ws._start_device_code_flow("elidia"))
-    try:
-        assert requested_scopes == [auth_mod.DEFAULT_ELIDIA_SCOPE]
-        assert result["flow"] == "device_code"
-        assert result["user_code"] == "ELIDIA-1234"
-        assert (
-            ws._oauth_sessions[result["session_id"]]["scope"]
-            == auth_mod.DEFAULT_ELIDIA_SCOPE
-        )
-    finally:
-        ws._oauth_sessions.pop(result["session_id"], None)
-
-
-def test_elidia_dashboard_device_flow_does_not_retry_legacy_scope_on_invoke_refusal(monkeypatch):
-    from elidia_cli import auth as auth_mod
-    from elidia_cli import web_server as ws
-
-    requested_scopes = []
-
-    def fake_request_device_code(**kwargs):
-        requested_scopes.append(kwargs["scope"])
-        raise _invoke_scope_refusal()
-
-    monkeypatch.delenv("ELIDIA_AGENT_USE_LEGACY_SESSION_KEYS", raising=False)
-    monkeypatch.setattr(auth_mod, "_request_device_code", fake_request_device_code)
-    monkeypatch.setattr(ws, "_elidia_poller", lambda sid: None)
-
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(Exception) as exc_info:
         asyncio.run(ws._start_device_code_flow("elidia"))
-    assert requested_scopes == [auth_mod.DEFAULT_ELIDIA_SCOPE]
+    assert "elidia" in str(exc_info.value).lower()
 
 
 def test_codex_dashboard_worker_persists_runtime_provider(tmp_path, monkeypatch):
@@ -207,54 +182,15 @@ def test_codex_dashboard_worker_persists_runtime_provider(tmp_path, monkeypatch)
         ws._oauth_sessions.pop(sid, None)
 
 
-def test_elidia_dashboard_poller_preserves_effective_scope_when_token_omits_scope(monkeypatch):
-    from elidia_cli import auth as auth_mod
+def test_elidia_dashboard_poller_removed():
+    """AIUT-3434: the dashboard's Elidia device-code poller was dead code
+    once the catalog stopped advertising "elidia" as an OAuth provider (the
+    device-code identity server it polled does not exist) — it must not
+    resurface as a live attribute on the web_server module.
+    """
     from elidia_cli import web_server as ws
 
-    session_id = "elidia-effective-scope-test"
-    ws._oauth_sessions[session_id] = {
-        "session_id": session_id,
-        "provider": "elidia",
-        "flow": "device_code",
-        "created_at": time.time(),
-        "status": "pending",
-        "error_message": None,
-        "portal_base_url": "https://developer.aiutils.io",
-        "client_id": "elidia-cli",
-        "device_code": "device-code",
-        "interval": 5,
-        "expires_at": time.time() + 600,
-        "scope": auth_mod.DEFAULT_ELIDIA_SCOPE,
-    }
-    captured_state = {}
-
-    def fake_refresh_elidia_oauth_from_state(state, **kwargs):
-        captured_state.update(state)
-        return {**state, "agent_key": "jwt-agent-key"}
-
-    monkeypatch.setattr(
-        auth_mod,
-        "_poll_for_token",
-        lambda **kwargs: {
-            "access_token": "access-token",
-            "refresh_token": "refresh-token",
-            "expires_in": 3600,
-            "token_type": "Bearer",
-        },
-    )
-    monkeypatch.setattr(
-        auth_mod,
-        "refresh_elidia_oauth_from_state",
-        fake_refresh_elidia_oauth_from_state,
-    )
-    monkeypatch.setattr(auth_mod, "persist_elidia_credentials", lambda state: None)
-
-    try:
-        ws._elidia_poller(session_id)
-        assert captured_state["scope"] == auth_mod.DEFAULT_ELIDIA_SCOPE
-        assert ws._oauth_sessions[session_id]["status"] == "approved"
-    finally:
-        ws._oauth_sessions.pop(session_id, None)
+    assert not hasattr(ws, "_elidia_poller")
 
 
 def test_minimax_dashboard_poller_accepts_absolute_ms_expired_in():
@@ -616,3 +552,26 @@ def test_unknown_pkce_provider_rejected_cleanly():
     # 4xx — what we MUST NOT see is a 200 with claude.ai in the body.
     assert resp.status_code >= 400, resp.text
     assert "claude.ai" not in resp.text.lower()
+
+
+def test_portal_status_reports_developer_api_key_login(monkeypatch):
+    """AIUT-3434: the dashboard's Portal card reflects the AiUtils Developer API
+    key, not the retired OAuth session, and links to the real API-keys page."""
+    from elidia_cli import auth as auth_mod
+
+    monkeypatch.setattr(
+        auth_mod,
+        "_resolve_api_key_provider_secret",
+        lambda provider_id, pconfig: ("ak-dev-dashboard001", "os-keychain")
+        if provider_id == "aiutils" else ("", ""),
+    )
+    resp = client.get("/api/portal", headers=HEADERS)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["logged_in"] is True
+    assert body["inference_url"] == "https://developer-api.aiutils.io/v1"
+    assert body["subscription_url"] == "https://developer.aiutils.io/api-keys"
+    assert "ak-dev-dashboard001" not in resp.text, "the key must never be returned"
+
+    monkeypatch.setattr(auth_mod, "_resolve_api_key_provider_secret", lambda p, c: ("", ""))
+    assert client.get("/api/portal", headers=HEADERS).json()["logged_in"] is False

@@ -56,7 +56,21 @@ interface ApiKeyOption {
   short?: string
 }
 
+// AiUtils Developer API keys are issued with this prefix; the gateway's
+// key_store (elidia_cli/key_store.py KEY_PREFIX) rejects anything else, so we
+// check here too for a specific, immediate message instead of a round trip.
+const AIUTILS_KEY_PREFIX = 'ak-dev-'
+
 const API_KEY_OPTIONS: ApiKeyOption[] = [
+  {
+    id: 'aiutils',
+    name: 'Elidia Portal (AiUtils)',
+    short: 'AiUtils Developer API key',
+    envKey: 'AIUTILS_API_KEY',
+    description: "AiUtils Developer API key — one key for the portal's models, billed to your AiUtils credits.",
+    docsUrl: 'https://developer.aiutils.io/',
+    placeholder: 'ak-dev-…'
+  },
   {
     id: 'openrouter',
     name: 'OpenRouter',
@@ -101,7 +115,6 @@ const API_KEY_OPTIONS: ApiKeyOption[] = [
 ]
 
 const PROVIDER_DISPLAY: Record<string, { order: number; title: string }> = {
-  elidia: { order: 0, title: 'Elidia Portal' },
   anthropic: { order: 1, title: 'Anthropic Claude' },
   'openai-codex': { order: 2, title: 'OpenAI Codex / ChatGPT' },
   'minimax-oauth': { order: 3, title: 'MiniMax' },
@@ -243,8 +256,11 @@ function Header() {
   )
 }
 
-const FEATURED_ID = 'elidia'
-const FEATURED_PITCH = 'One subscription, 300+ frontier models — the recommended way to run Elidia'
+// Elidia Portal authenticates with an AiUtils Developer API key (see
+// API_KEY_OPTIONS[0]), not OAuth — the backend no longer exposes an "elidia"
+// OAuth provider, so this card is rendered unconditionally rather than
+// matched against the OAuth provider list.
+const FEATURED_PITCH = "Paste your AiUtils Developer API key to unlock the portal's models, billed to your AiUtils credits."
 const SHOW_ALL_KEY = 'elidia-onboarding-show-all-v1'
 
 const readShowAll = () => {
@@ -280,34 +296,28 @@ export function Picker({ ctx }: { ctx: OnboardingContext }) {
   }
 
   const select = (p: OAuthProvider) => void startProviderOAuth(p, ctx)
-  const featured = ordered.find(p => p.id === FEATURED_ID) ?? null
-  const rest = featured ? ordered.filter(p => p.id !== FEATURED_ID) : ordered
-  // Collapse the secondary providers behind a disclosure only when Elidia
-  // Portal is present to anchor the choice — otherwise show the full list.
-  const collapsible = Boolean(featured) && rest.length > 0
-  const showRest = !collapsible || showAll
+  const openAiutilsKeyForm = () => setOnboardingMode('apikey')
+  const showRest = showAll
 
   return (
     <div className="grid gap-2">
-      {featured ? <FeaturedProviderRow onSelect={select} provider={featured} /> : null}
+      <FeaturedRow onClick={openAiutilsKeyForm} pitch={FEATURED_PITCH} title="Elidia Portal" />
       {showRest ? (
         <>
-          {rest.map(p => (
+          {ordered.map(p => (
             <ProviderRow key={p.id} onSelect={select} provider={p} />
           ))}
           <KeyProviderRow onClick={() => setOnboardingMode('apikey')} />
         </>
       ) : null}
-      {collapsible ? (
-        <button
-          className="flex items-center justify-center gap-1.5 pt-1 text-xs font-medium text-muted-foreground transition hover:text-foreground"
-          onClick={() => setShowAll(persistShowAll(!showAll))}
-          type="button"
-        >
-          {showAll ? 'Collapse' : 'Other providers'}
-          <ChevronDown className={cn('size-3.5 transition', showAll && 'rotate-180')} />
-        </button>
-      ) : null}
+      <button
+        className="flex items-center justify-center gap-1.5 pt-1 text-xs font-medium text-muted-foreground transition hover:text-foreground"
+        onClick={() => setShowAll(persistShowAll(!showAll))}
+        type="button"
+      >
+        {showAll ? 'Collapse' : 'Other providers'}
+        <ChevronDown className={cn('size-3.5 transition', showAll && 'rotate-180')} />
+      </button>
       <div className="flex justify-end pt-1">
         <button
           className="text-xs font-medium text-muted-foreground hover:text-foreground"
@@ -321,38 +331,28 @@ export function Picker({ ctx }: { ctx: OnboardingContext }) {
   )
 }
 
-function FeaturedProviderRow({
-  onSelect,
-  provider
-}: {
-  onSelect: (provider: OAuthProvider) => void
-  provider: OAuthProvider
-}) {
-  const loggedIn = provider.status?.logged_in
-
+// Reusable presentational row for the single "recommended" pick at the top
+// of the picker. Unlike ProviderRow, it doesn't wrap an OAuthProvider — the
+// Elidia Portal card it renders today authenticates via API key, not OAuth —
+// so it takes plain title/pitch/onClick instead. There's no live "connected"
+// signal for it in this component, so it never renders a Connected tag.
+function FeaturedRow({ onClick, pitch, title }: { onClick: () => void; pitch: string; title: string }) {
   return (
     <button
-      className={cn(
-        'group flex w-full items-center justify-between gap-4 rounded-2xl border-2 border-primary/50 bg-primary/5 p-4 text-left transition hover:border-primary hover:bg-primary/10',
-        loggedIn && 'border-primary'
-      )}
-      onClick={() => onSelect(provider)}
+      className="group flex w-full items-center justify-between gap-4 rounded-2xl border-2 border-primary/50 bg-primary/5 p-4 text-left transition hover:border-primary hover:bg-primary/10"
+      onClick={onClick}
       type="button"
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <img alt="" className="size-5 shrink-0 rounded" src={assetPath('apple-touch-icon.png')} />
-          <span className="text-base font-semibold">{providerTitle(provider)}</span>
-          {loggedIn ? (
-            <ConnectedTag />
-          ) : (
-            <span className="inline-flex items-center gap-1.5 bg-primary px-2 py-0.5 text-[0.64rem] font-semibold uppercase tracking-[0.16em] text-primary-foreground">
-              <span aria-hidden="true" className="dither inline-block size-2 shrink-0" />
-              Recommended
-            </span>
-          )}
+          <span className="text-base font-semibold">{title}</span>
+          <span className="inline-flex items-center gap-1.5 bg-primary px-2 py-0.5 text-[0.64rem] font-semibold uppercase tracking-[0.16em] text-primary-foreground">
+            <span aria-hidden="true" className="dither inline-block size-2 shrink-0" />
+            Recommended
+          </span>
         </div>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">{FEATURED_PITCH}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{pitch}</p>
       </div>
       <ChevronRight className="size-5 shrink-0 text-primary transition group-hover:translate-x-0.5" />
     </button>
@@ -376,8 +376,10 @@ function KeyProviderRow({ onClick }: { onClick: () => void }) {
       type="button"
     >
       <div className="min-w-0">
-        <span className="text-sm font-semibold">OpenRouter</span>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">One key, hundreds of models — a solid default</p>
+        <span className="text-sm font-semibold">Another provider's API key</span>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          OpenRouter, OpenAI, Gemini, xAI or a local endpoint
+        </p>
       </div>
       <ChevronRight className="size-4 text-muted-foreground transition group-hover:text-foreground" />
     </button>
@@ -422,6 +424,14 @@ function ApiKeyForm({ canGoBack, ctx }: { canGoBack: boolean; ctx: OnboardingCon
 
   const submit = async () => {
     if (!canSave || saving) {
+      return
+    }
+
+    const trimmed = value.trim()
+
+    if (option.id === 'aiutils' && !trimmed.startsWith(AIUTILS_KEY_PREFIX)) {
+      setError(`AiUtils Developer API keys start with "${AIUTILS_KEY_PREFIX}" — get one at developer.aiutils.io.`)
+
       return
     }
 

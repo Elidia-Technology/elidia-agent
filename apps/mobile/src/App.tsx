@@ -5,8 +5,14 @@ import { clearPairing, loadPairing } from './lib/credentials'
 import { Chat } from './screens/Chat'
 import { Pair } from './screens/Pair'
 import { Sessions } from './screens/Sessions'
+import { Settings } from './screens/Settings'
 
-type View = { name: 'loading' } | { name: 'pair' } | { name: 'sessions' } | { name: 'chat'; sessionId: string }
+type View =
+  | { name: 'loading' }
+  | { name: 'pair' }
+  | { name: 'sessions' }
+  | { name: 'chat'; sessionId: string }
+  | { name: 'settings' }
 
 export default function App() {
   const [gateway, setGateway] = useState<Gateway | null>(null)
@@ -56,10 +62,15 @@ export default function App() {
     )
   }
 
+  if (view.name === 'settings') {
+    return <Settings onBack={() => setView({ name: 'sessions' })} />
+  }
+
   return (
     <Sessions
       gateway={gateway}
       onOpen={id => setView({ name: 'chat', sessionId: id })}
+      onOpenSettings={() => setView({ name: 'settings' })}
       onUnpair={unpair}
     />
   )

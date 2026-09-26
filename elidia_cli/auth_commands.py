@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import sys
 import time
@@ -28,12 +29,34 @@ from agent.credential_pool import (
 )
 import elidia_cli.auth as auth_mod
 from elidia_cli.auth import PROVIDER_REGISTRY
+from elidia_cli import key_cli
 from elidia_constants import OPENROUTER_BASE_URL
 from elidia_cli.secret_prompt import masked_secret_prompt
 
+logger = logging.getLogger(__name__)
+
 
 # Providers that support OAuth login in addition to API keys.
-_OAUTH_CAPABLE_PROVIDERS = {"anthropic", "elidia", "openai-codex", "xai-oauth", "qwen-oauth", "google-gemini-cli", "minimax-oauth"}
+#
+# "elidia" is intentionally NOT here. It used to be a device-code OAuth
+# provider, but the OAuth identity server it pointed at
+# (developer.aiutils.io/api/oauth/device/code) does not exist — the Portal
+# now issues AiUtils Developer API keys instead. `auth_add_command` handles
+# "elidia" as a special case before this set is even consulted.
+_OAUTH_CAPABLE_PROVIDERS = {"anthropic", "openai-codex", "xai-oauth", "qwen-oauth", "google-gemini-cli", "minimax-oauth"}
+
+# Elidia Portal authenticates with an AiUtils Developer API key, not OAuth.
+_ELIDIA_API_KEY_GUIDANCE = (
+    "Elidia Portal authenticates with an AiUtils Developer API key, not "
+    "OAuth. Storing it below via the OS keychain (same as `elidia key "
+    "store`)."
+)
+_ELIDIA_OAUTH_REJECTED_MESSAGE = (
+    "`elidia auth add elidia --type oauth` is no longer supported — Elidia "
+    "Portal authenticates with an AiUtils Developer API key now. Run "
+    "`elidia auth add elidia` (no --type flag) or `elidia key store`, or "
+    "set the AIUTILS_API_KEY / ELIDIA_KEY environment variable."
+)
 
 
 def _get_custom_provider_names() -> list:
@@ -79,6 +102,8 @@ def _normalize_provider(provider: str) -> str:
         return "openrouter"
     if normalized in {"grok-oauth", "xai-oauth", "x-ai-oauth", "xai-grok-oauth"}:
         return "xai-oauth"
+    if normalized == "elidia-portal":
+        return "elidia"
     # Check if it matches a custom provider name
     custom_key = _resolve_custom_provider_input(normalized)
     if custom_key:
@@ -174,6 +199,24 @@ def auth_add_command(args) -> None:
         else:
             requested_type = AUTH_TYPE_OAUTH if provider in _OAUTH_CAPABLE_PROVIDERS else AUTH_TYPE_API_KEY
 
+    if provider == "elidia":
+        logger.debug(
+            "Entered into auth_add_command: provider=elidia requested_type=%s",
+            requested_type,
+        )
+        # Elidia Portal used to be a device-code OAuth provider. That
+        # identity server no longer exists (see AIUT-3434) — the Portal now
+        # issues AiUtils Developer API keys. Route straight to the same
+        # OS-keychain flow `elidia key store` uses instead of a second,
+        # credential-pool-based implementation.
+        if requested_type == AUTH_TYPE_OAUTH:
+            raise SystemExit(_ELIDIA_OAUTH_REJECTED_MESSAGE)
+        print(_ELIDIA_API_KEY_GUIDANCE)
+        rc = key_cli.cmd_key_store(SimpleNamespace(key=getattr(args, "api_key", None)))
+        if rc:
+            raise SystemExit(rc)
+        return
+
     pool = load_pool(provider)
 
     # Clear ALL suppressions for this provider — re-adding a credential is
@@ -244,66 +287,6 @@ def auth_add_command(args) -> None:
         )
         pool.add_entry(entry)
         print(f'Added {provider} OAuth credential #{len(pool.entries())}: "{entry.label}"')
-        return
-
-    if provider == "elidia":
-        # Codex-style auto-import: if a shared Elidia credential lives at
-        # <elidia-root>/shared/elidia_auth.json (written by any previous
-        # successful login), offer to import it instead of running the
-        # full device-code flow. This makes `elidia --profile <name>
-        # auth add elidia --type oauth` a one-tap operation for users who
-        # run multiple profiles.
-        shared = auth_mod._read_shared_elidia_state()
-        if shared:
-            try:
-                path = auth_mod._elidia_shared_store_path()
-            except RuntimeError:
-                path = None
-            print()
-            if path:
-                print(f"Found existing Elidia OAuth credentials at {path}")
-            else:
-                print("Found existing shared Elidia OAuth credentials")
-            try:
-                do_import = input("Import these credentials? [Y/n]: ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                do_import = "y"
-            if do_import in {"", "y", "yes"}:
-                print("Rehydrating Elidia session from shared credentials...")
-                rehydrated = auth_mod._try_import_shared_elidia_state(
-                    timeout_seconds=getattr(args, "timeout", None) or 15.0,
-                )
-                if rehydrated is not None:
-                    custom_label = (getattr(args, "label", None) or "").strip() or None
-                    entry = auth_mod.persist_elidia_credentials(rehydrated, label=custom_label)
-                    shown_label = entry.label if entry is not None else label_from_token(
-                        rehydrated.get("access_token", ""), _oauth_default_label(provider, 1),
-                    )
-                    print(f'Imported {provider} OAuth credentials: "{shown_label}"')
-                    return
-                # Rehydrate failed (expired refresh_token, portal down, etc.)
-                # — fall through to device-code flow.
-                print("Could not refresh shared credentials — falling back to device-code login.")
-
-        creds = auth_mod._elidia_device_code_login(
-            portal_base_url=getattr(args, "portal_url", None),
-            inference_base_url=getattr(args, "inference_url", None),
-            client_id=getattr(args, "client_id", None),
-            scope=getattr(args, "scope", None),
-            open_browser=not getattr(args, "no_browser", False),
-            timeout_seconds=getattr(args, "timeout", None) or 15.0,
-            insecure=bool(getattr(args, "insecure", False)),
-            ca_bundle=getattr(args, "ca_bundle", None),
-        )
-        # Honor `--label <name>` so elidia matches other providers' UX.  The
-        # helper embeds this into providers.elidia so that label_from_token
-        # doesn't overwrite it on every subsequent load_pool("elidia").
-        custom_label = (getattr(args, "label", None) or "").strip() or None
-        entry = auth_mod.persist_elidia_credentials(creds, label=custom_label)
-        shown_label = entry.label if entry is not None else label_from_token(
-            creds.get("access_token", ""), _oauth_default_label(provider, 1),
-        )
-        print(f'Saved {provider} OAuth device-code credentials: "{shown_label}"')
         return
 
     if provider == "openai-codex":

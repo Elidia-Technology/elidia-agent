@@ -742,7 +742,6 @@ def setup_model_provider(config: dict, *, quick: bool = False):
     # on demand via `elidia auth add`, `elidia setup` vision, and
     # `elidia setup tts`. This keeps both quick and full setup thin.
 
-    # Tool Gateway prompt is already shown by _model_flow_elidia() above.
     save_config(config)
 
 
@@ -2721,16 +2720,16 @@ SETUP_SECTIONS = [
 
 
 def _run_portal_one_shot(config: dict) -> None:
-    """One-shot Elidia Portal setup — OAuth + model pick + provider + Tool Gateway.
+    """One-shot Elidia Portal setup — Developer API key + model pick + provider.
 
     Wired into ``elidia setup --portal`` and ``elidia portal``. This is the
     Elidia-Portal slice of the first-time quick setup, collapsed into a single
     shareable command so a brand-new user goes from zero to a fully working
     Elidia session — model selected, provider set, and web/image/tts/browser
-    tools routed via their Portal sub — without being told to run
-    ``elidia setup`` and hunt for the quick-setup option.
+    AiUtils tools billed to the same Developer API key — without being told to
+    run ``elidia setup`` and hunt for the quick-setup option.
 
-    The login + model selection + provider switch + Tool Gateway opt-in are all
+    The key entry + model selection + provider switch are all
     delegated to ``_model_flow_elidia`` — the exact same flow quick setup uses
     (``_run_first_time_quick_setup``) and the same one ``elidia model`` runs
     when you pick Elidia. Routing through it (instead of hand-rolling the auth +
@@ -2754,28 +2753,23 @@ def _run_portal_one_shot(config: dict) -> None:
         )
     )
     print()
-    print_info("  One subscription, 300+ models, plus the Tool Gateway:")
-    print_info("    web search, image generation, TTS, browser automation")
-    print_info("    — all routed through your Elidia Portal sub.")
+    print_info("  One AiUtils Developer API key (ak-dev-…) for chat models and the")
+    print_info("  AiUtils tools, billed to your prepaid DT credits.")
     print()
-    print_info("  Sign up: https://developer.aiutils.io/manage-subscription")
+    print_info("  Get a key: https://developer.aiutils.io/api-keys")
     print()
 
-    # _model_flow_elidia handles BOTH the logged-out path (device-code OAuth,
-    # which selects a model internally) and the already-logged-in path (curated
-    # Elidia model picker), then offers the Tool Gateway opt-in and sets
-    # provider=elidia via the login/model save. This is the same routine quick
-    # setup calls, so `elidia portal` == quick setup's Elidia step.
+    # _model_flow_elidia stores the AiUtils Developer API key (OS keychain when
+    # available) and runs the model picker, setting provider=aiutils. This is
+    # the same routine quick setup calls, so `elidia portal` == quick setup's
+    # Elidia step.
     try:
         from elidia_cli.main import _model_flow_elidia
 
         _model_flow_elidia(config)
     except (KeyboardInterrupt, EOFError, SystemExit):
-        # _login_elidia raises SystemExit(130)/(1) on cancel/failure; the
-        # logged-out path inside _model_flow_elidia catches it, but the
-        # expired-session re-login path only catches Exception, so a
-        # SystemExit there would otherwise escape and kill the whole CLI.
-        # Treat all of these as a graceful cancel/abort for the portal flow.
+        # A cancelled prompt must not kill the whole CLI; treat it as a
+        # graceful cancel/abort for the portal flow.
         print()
         print_info("  Setup cancelled.")
         print_info("  You can retry later with `elidia portal`.")
@@ -3046,15 +3040,14 @@ def _run_first_time_quick_setup(config: dict, elidia_home, is_existing: bool):
     """
     from elidia_cli.config import load_config
 
-    # Step 1: Elidia Portal — OAuth login + model selection.
-    # _model_flow_elidia() handles both the logged-out path (device-code OAuth,
-    # which selects a model internally) and the already-logged-in path (curated
-    # Elidia model picker). Provider is set to "elidia" by the login/model save.
+    # Step 1: Elidia Portal — AiUtils Developer API key + model selection.
+    # _model_flow_elidia() stores the key (OS keychain when available) and runs
+    # the model picker; the provider is set to "aiutils".
     print()
     print_header("Elidia Portal")
-    print_info("One subscription, 300+ models, plus the Tool Gateway:")
-    print_info("  web search, image generation, TTS, browser automation.")
-    print_info("Sign up: https://developer.aiutils.io/manage-subscription")
+    print_info("One AiUtils Developer API key (ak-dev-…) for chat models and the")
+    print_info("AiUtils tools, billed to your prepaid DT credits.")
+    print_info("Get a key: https://developer.aiutils.io/api-keys")
     print()
     try:
         from elidia_cli.main import _model_flow_elidia

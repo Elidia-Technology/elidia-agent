@@ -13,6 +13,7 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useM
 
 import { matchesQuery, useMediaQuery } from '@/hooks/use-media-query'
 
+import { injectFontStylesheet } from './inject-font'
 import {
   BUILTIN_THEME_LIST,
   BUILTIN_THEMES,
@@ -28,8 +29,6 @@ const MODE_KEY = 'elidia-desktop-mode-v1'
 const RETIRED_SKINS = new Set(['elidia-light', 'default', 'gold'])
 
 export type ThemeMode = 'light' | 'dark' | 'system'
-
-const INJECTED_FONT_URLS = new Set<string>()
 
 const resolveMode = (mode: ThemeMode, systemDark = matchesQuery('(prefers-color-scheme: dark)')): 'light' | 'dark' =>
   mode === 'system' ? (systemDark ? 'dark' : 'light') : mode
@@ -231,13 +230,8 @@ function applyTheme(theme: DesktopTheme, mode: 'light' | 'dark') {
     foreground: c.foreground
   })
 
-  if (typo.fontUrl && !INJECTED_FONT_URLS.has(typo.fontUrl)) {
-    const link = document.createElement('link')
-    link.rel = 'stylesheet'
-    link.href = typo.fontUrl
-    link.dataset.elidiaThemeFont = 'true'
-    document.head.appendChild(link)
-    INJECTED_FONT_URLS.add(typo.fontUrl)
+  if (typo.fontUrl) {
+    injectFontStylesheet(typo.fontUrl)
   }
 }
 

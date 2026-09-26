@@ -6,10 +6,12 @@ import { Gateway, GatewayError, Session } from '../lib/gateway'
 export function Sessions({
   gateway,
   onOpen,
+  onOpenSettings,
   onUnpair,
 }: {
   gateway: Gateway
   onOpen: (id: string) => void
+  onOpenSettings: () => void
   onUnpair: () => void
 }) {
   const [sessions, setSessions] = useState<Session[]>([])
@@ -46,6 +48,7 @@ export function Sessions({
     <div className="sessions">
       <header>
         <span className="title">Elidia</span>
+        <button className="link" onClick={onOpenSettings} aria-label="Settings">⚙</button>
         <button className="link" onClick={onUnpair}>Disconnect</button>
       </header>
 

@@ -1,10 +1,12 @@
 import { useStore } from '@nanostores/react'
 
+import { Button } from '@/components/ui/button'
 import { triggerHaptic } from '@/lib/haptics'
-import { Check, Palette } from '@/lib/icons'
+import { Check, Palette, RefreshCw } from '@/lib/icons'
 import { cn } from '@/lib/utils'
 import { $toolViewMode, setToolViewMode } from '@/store/tool-view'
 import { useTheme } from '@/themes/context'
+import { FONT_FAMILY_PRESETS, FONT_SIZE_PRESETS, type FontFamilyPreset, useFontPreferences } from '@/themes/fonts'
 import { BUILTIN_THEMES } from '@/themes/presets'
 
 import { MODE_OPTIONS } from './constants'
@@ -48,6 +50,122 @@ function ThemePreview({ name }: { name: string }) {
         </div>
       </div>
     </div>
+  )
+}
+
+/** One selectable font-family card; its sample line is rendered in that family's own stack. */
+function FontFamilyCard({
+  active,
+  onSelect,
+  preset
+}: {
+  active: boolean
+  onSelect: () => void
+  preset: FontFamilyPreset
+}) {
+  const sampleStyle = preset.stack ? { fontFamily: preset.stack } : undefined
+
+  return (
+    <button
+      aria-pressed={active}
+      className={cn(
+        'rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) p-2.5 text-left transition hover:bg-(--chrome-action-hover)',
+        active && 'border-(--ui-stroke-secondary) bg-(--ui-bg-tertiary)'
+      )}
+      onClick={onSelect}
+      type="button"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-[length:var(--conversation-text-font-size)] font-medium" style={sampleStyle}>
+          {preset.label}
+        </div>
+        {active && (
+          <span className="grid size-5 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground">
+            <Check className="size-3.5" />
+          </span>
+        )}
+      </div>
+      <div className="mt-1.5 truncate text-base leading-tight" style={sampleStyle}>
+        The quick brown fox jumps
+      </div>
+      <div className="mt-1.5 text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
+        {preset.description}
+      </div>
+    </button>
+  )
+}
+
+/** Font family + size preferences, layered on top of the active theme (survives theme/skin switches). */
+function FontSettings() {
+  const { family, familyId, reset, setFamily, setSize, size, sizeId } = useFontPreferences()
+
+  return (
+    <section className="rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-chat-bubble-background) p-3 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium">Font</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Sticks to your choice across every theme. Pick a family and a text size.
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Pill>
+            {family.label} · {size.label}
+          </Pill>
+          <Button
+            className="text-muted-foreground"
+            onClick={() => {
+              triggerHaptic('warning')
+              reset()
+            }}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <RefreshCw className="size-3.5" />
+            Reset
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {FONT_FAMILY_PRESETS.map(preset => (
+          <FontFamilyCard
+            active={familyId === preset.id}
+            key={preset.id}
+            onSelect={() => {
+              triggerHaptic('crisp')
+              setFamily(preset.id)
+            }}
+            preset={preset}
+          />
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {FONT_SIZE_PRESETS.map(preset => {
+          const active = sizeId === preset.id
+
+          return (
+            <button
+              aria-pressed={active}
+              className={cn(
+                'rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) px-3 py-1.5 text-[length:var(--conversation-text-font-size)] font-medium transition hover:bg-(--chrome-action-hover)',
+                active && 'border-(--ui-stroke-secondary) bg-(--ui-bg-tertiary)'
+              )}
+              key={preset.id}
+              onClick={() => {
+                triggerHaptic('selection')
+                setSize(preset.id)
+              }}
+              type="button"
+            >
+              {preset.label}
+            </button>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -113,6 +231,8 @@ export function AppearanceSettings() {
             })}
           </div>
         </section>
+
+        <FontSettings />
 
         <section className="rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-chat-bubble-background) p-3 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-3">

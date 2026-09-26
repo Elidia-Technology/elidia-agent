@@ -2,7 +2,7 @@
   "name": "elidia",
   "productName": "Elidia Agent",
   "private": true,
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Native desktop shell for Elidia Agent.",
   "author": "AiUtils",
   "homepage": "https://aiutils.io",
@@ -47,6 +47,7 @@
     "preview": "node scripts/assert-root-install.cjs && vite preview --host 127.0.0.1 --port 4174"
   },
   "dependencies": {
+    "@aiutils/ui": "npm:@nous-research/ui@0.13.0",
     "@assistant-ui/react": "^0.12.28",
     "@assistant-ui/react-streamdown": "^0.1.11",
     "@audiowave/react": "^0.6.2",
@@ -57,9 +58,9 @@
     "@elidia/shared": "file:../shared",
     "@icons-pack/react-simple-icons": "^13.13.0",
     "@nanostores/react": "^1.1.0",
-    "@aiutils/ui": "npm:@nous-research/ui@0.13.0",
     "@radix-ui/react-slot": "^1.2.4",
     "@streamdown/code": "^1.1.1",
+    "@streamdown/mermaid": "^1.0.2",
     "@tabler/icons-react": "^3.41.1",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.2.4",

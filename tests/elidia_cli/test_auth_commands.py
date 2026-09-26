@@ -97,31 +97,23 @@ def test_auth_add_anthropic_oauth_persists_pool_entry(tmp_path, monkeypatch):
     assert entry["expires_at_ms"] == 1711234567000
 
 
-def test_auth_add_elidia_oauth_persists_pool_entry(tmp_path, monkeypatch):
+def test_auth_add_elidia_oauth_rejected_with_key_store_guidance(tmp_path, monkeypatch):
+    """AIUT-3434: Elidia Portal has no OAuth device-code identity server.
+
+    `elidia auth add elidia --type oauth` must be rejected with a clear
+    message pointing at the API-key flow, and must NEVER call the dead
+    device-code login helper.
+    """
     monkeypatch.setenv("ELIDIA_HOME", str(tmp_path / "elidia"))
     _write_auth_store(tmp_path, {"version": 1, "providers": {}})
-    token = _jwt_with_email("elidia@example.com")
+
+    def _must_not_be_called(**kwargs):
+        raise AssertionError(
+            "_elidia_device_code_login must not run for `--type oauth` on elidia"
+        )
+
     monkeypatch.setattr(
-        "elidia_cli.auth._elidia_device_code_login",
-        lambda **kwargs: {
-            "portal_base_url": "https://portal.example.com",
-            "inference_base_url": "https://inference.example.com/v1",
-            "client_id": "elidia-cli",
-            "scope": "inference:invoke",
-            "token_type": "Bearer",
-            "access_token": token,
-            "refresh_token": "refresh-token",
-            "obtained_at": "2026-03-23T10:00:00+00:00",
-            "expires_at": "2026-03-23T11:00:00+00:00",
-            "expires_in": 3600,
-            "agent_key": token,
-            "agent_key_id": None,
-            "agent_key_expires_at": "2026-03-23T10:30:00+00:00",
-            "agent_key_expires_in": 1800,
-            "agent_key_reused": False,
-            "agent_key_obtained_at": "2026-03-23T10:00:10+00:00",
-            "tls": {"insecure": False, "ca_bundle": None},
-        },
+        "elidia_cli.auth._elidia_device_code_login", _must_not_be_called
     )
 
     from elidia_cli.auth_commands import auth_add_command
@@ -140,34 +132,101 @@ def test_auth_add_elidia_oauth_persists_pool_entry(tmp_path, monkeypatch):
         insecure = False
         ca_bundle = None
 
+    with pytest.raises(SystemExit) as exc_info:
+        auth_add_command(_Args())
+
+    message = str(exc_info.value).lower()
+    assert "api key" in message
+    assert "oauth" in message
+
+    # No pool entry and no auth-store mutation — the rejection is a pure
+    # early exit, not a partial write.
+    payload = json.loads((tmp_path / "elidia" / "auth.json").read_text())
+    assert "elidia" not in payload.get("credential_pool", {})
+    assert "elidia" not in payload.get("providers", {})
+
+
+def test_auth_add_elidia_default_invokes_key_store_path(tmp_path, monkeypatch):
+    """`elidia auth add elidia` (no --type) must store an AiUtils Developer
+    API key via the same OS-keychain path as `elidia key store`, not the
+    credential-pool/OAuth machinery.
+    """
+    monkeypatch.setenv("ELIDIA_HOME", str(tmp_path / "elidia"))
+    monkeypatch.delenv("ELIDIA_KEY", raising=False)
+    monkeypatch.delenv("ELIDIA_API_KEY", raising=False)
+    monkeypatch.delenv("AIUTILS_API_KEY", raising=False)
+    _write_auth_store(tmp_path, {"version": 1, "providers": {}})
+
+    stored_keys = []
+
+    def _fake_store(key):
+        stored_keys.append(key)
+        return True, None
+
+    # Mock only the OS-keychain write (and the terminal prompt path, which
+    # isn't reached because api_key is supplied) — not the dispatch logic
+    # under test.
+    monkeypatch.setattr("elidia_cli.key_store.store", _fake_store)
+
+    def _must_not_be_called(**kwargs):
+        raise AssertionError(
+            "_elidia_device_code_login must not run for the default (API-key) flow"
+        )
+
+    monkeypatch.setattr(
+        "elidia_cli.auth._elidia_device_code_login", _must_not_be_called
+    )
+
+    from elidia_cli.auth_commands import auth_add_command
+
+    class _Args:
+        provider = "elidia"
+        auth_type = None
+        api_key = "ak-dev-test1234567890"
+        label = None
+        portal_url = None
+        inference_url = None
+        client_id = None
+        scope = None
+        no_browser = False
+        timeout = None
+        insecure = False
+        ca_bundle = None
+
     auth_add_command(_Args())
 
+    assert stored_keys == ["ak-dev-test1234567890"]
+
+    # The key-store path never touches the credential pool / OAuth auth
+    # store for "elidia".
     payload = json.loads((tmp_path / "elidia" / "auth.json").read_text())
+    assert "elidia" not in payload.get("credential_pool", {})
+    assert "elidia" not in payload.get("providers", {})
 
-    # Pool has exactly one canonical `device_code` entry — not a duplicate
-    # pair of `manual:device_code` + `device_code` (the latter would be
-    # materialised by _seed_from_singletons on every load_pool).
-    entries = payload["credential_pool"]["elidia"]
-    device_code_entries = [
-        item for item in entries if item["source"] == "device_code"
-    ]
-    assert len(device_code_entries) == 1, entries
-    assert not any(item["source"] == "manual:device_code" for item in entries)
-    entry = device_code_entries[0]
-    assert entry["source"] == "device_code"
-    assert entry["agent_key"] == token
-    assert entry["portal_base_url"] == "https://portal.example.com"
 
-    # `elidia auth add elidia` must also populate providers.elidia so the
-    # 401-recovery path (resolve_elidia_runtime_credentials) can refresh an
-    # invoke JWT when the token expires. If this mirror is missing, recovery
-    # raises "Elidia is not logged into Elidia Portal" and the agent dies.
-    singleton = payload["providers"]["elidia"]
-    assert singleton["access_token"] == token
-    assert singleton["refresh_token"] == "refresh-token"
-    assert singleton["agent_key"] == token
-    assert singleton["portal_base_url"] == "https://portal.example.com"
-    assert singleton["inference_base_url"] == "https://inference.example.com/v1"
+def test_auth_add_elidia_portal_alias_uses_key_store_path(tmp_path, monkeypatch):
+    """`elidia auth add elidia-portal` must normalize to the same API-key
+    flow as `elidia auth add elidia`."""
+    monkeypatch.setenv("ELIDIA_HOME", str(tmp_path / "elidia"))
+    _write_auth_store(tmp_path, {"version": 1, "providers": {}})
+
+    stored_keys = []
+    monkeypatch.setattr(
+        "elidia_cli.key_store.store",
+        lambda key: (stored_keys.append(key), (True, None))[1],
+    )
+
+    from elidia_cli.auth_commands import auth_add_command
+
+    class _Args:
+        provider = "elidia-portal"
+        auth_type = None
+        api_key = "ak-dev-portal-alias-test"
+        label = None
+
+    auth_add_command(_Args())
+
+    assert stored_keys == ["ak-dev-portal-alias-test"]
 
 
 def test_auth_add_minimax_oauth_starts_login_and_persists_pool_entry(tmp_path, monkeypatch):
@@ -214,35 +273,20 @@ def test_auth_add_minimax_oauth_starts_login_and_persists_pool_entry(tmp_path, m
     assert entry["base_url"] == "https://api.minimax.io/anthropic"
 
 
-def test_auth_add_elidia_oauth_honors_custom_label(tmp_path, monkeypatch):
-    """`elidia auth add elidia --type oauth --label <name>` must preserve the
-    custom label end-to-end — it was silently dropped in the first cut of the
-    persist_elidia_credentials helper because `--label` wasn't threaded through.
+def test_auth_add_elidia_oauth_rejected_even_with_label(tmp_path, monkeypatch):
+    """`--label` must not bypass the OAuth rejection for elidia — labels are
+    a credential-pool concept and the API-key store has no such field.
     """
     monkeypatch.setenv("ELIDIA_HOME", str(tmp_path / "elidia"))
     _write_auth_store(tmp_path, {"version": 1, "providers": {}})
-    token = _jwt_with_email("elidia@example.com")
+
+    def _must_not_be_called(**kwargs):
+        raise AssertionError(
+            "_elidia_device_code_login must not run for `--type oauth` on elidia"
+        )
+
     monkeypatch.setattr(
-        "elidia_cli.auth._elidia_device_code_login",
-        lambda **kwargs: {
-            "portal_base_url": "https://portal.example.com",
-            "inference_base_url": "https://inference.example.com/v1",
-            "client_id": "elidia-cli",
-            "scope": "inference:invoke",
-            "token_type": "Bearer",
-            "access_token": token,
-            "refresh_token": "refresh-token",
-            "obtained_at": "2026-03-23T10:00:00+00:00",
-            "expires_at": "2026-03-23T11:00:00+00:00",
-            "expires_in": 3600,
-            "agent_key": token,
-            "agent_key_id": None,
-            "agent_key_expires_at": "2026-03-23T10:30:00+00:00",
-            "agent_key_expires_in": 1800,
-            "agent_key_reused": False,
-            "agent_key_obtained_at": "2026-03-23T10:00:10+00:00",
-            "tls": {"insecure": False, "ca_bundle": None},
-        },
+        "elidia_cli.auth._elidia_device_code_login", _must_not_be_called
     )
 
     from elidia_cli.auth_commands import auth_add_command
@@ -261,18 +305,10 @@ def test_auth_add_elidia_oauth_honors_custom_label(tmp_path, monkeypatch):
         insecure = False
         ca_bundle = None
 
-    auth_add_command(_Args())
+    with pytest.raises(SystemExit) as exc_info:
+        auth_add_command(_Args())
 
-    payload = json.loads((tmp_path / "elidia" / "auth.json").read_text())
-
-    # Custom label reaches the pool entry …
-    pool_entry = payload["credential_pool"]["elidia"][0]
-    assert pool_entry["source"] == "device_code"
-    assert pool_entry["label"] == "my-elidia"
-
-    # … and survives in providers.elidia so a subsequent load_pool() re-seeds
-    # it without reverting to the auto-derived fingerprint.
-    assert payload["providers"]["elidia"]["label"] == "my-elidia"
+    assert "api key" in str(exc_info.value).lower()
 
 
 def test_auth_add_codex_oauth_persists_pool_entry(tmp_path, monkeypatch):

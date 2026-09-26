@@ -1,4 +1,7 @@
 import './styles.css'
+// Side-effect import: applies the persisted user font family/size to
+// `document.documentElement` before the first paint (see themes/fonts.ts).
+import './themes/fonts'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'

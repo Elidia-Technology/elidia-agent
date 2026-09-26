@@ -6,11 +6,12 @@ import type {
   MouseEvent as ReactMouseEvent,
   ReactNode
 } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import ShikiHighlighter from 'react-shiki'
 import { Streamdown } from 'streamdown'
 
 import { ELIDIA_PATHS_MIME } from '@/app/chat/hooks/use-composer-actions'
+import { useMermaidPlugin } from '@/lib/mermaid'
 import { cn } from '@/lib/utils'
 import type { PreviewTarget } from '@/store/preview'
 
@@ -255,7 +256,9 @@ function MarkdownCode({ className, children, ...props }: ComponentProps<'code'>)
     )
   }
 
-  return (
+  const source = String(children).replace(/\n$/, '')
+
+  const highlighted = (
     <ShikiHighlighter
       addDefaultStyles={false}
       as="div"
@@ -265,9 +268,57 @@ function MarkdownCode({ className, children, ...props }: ComponentProps<'code'>)
       showLanguage={false}
       theme={SHIKI_THEME}
     >
-      {String(children).replace(/\n$/, '')}
+      {source}
     </ShikiHighlighter>
   )
+
+  // This component replaces Streamdown's own code renderer, so ```mermaid
+  // fences must be drawn here — with the same plugin the chat uses.
+  if (language === 'mermaid') {
+    return <MermaidDiagram fallback={highlighted} source={source} />
+  }
+
+  return highlighted
+}
+
+function MermaidDiagram({ fallback, source }: { fallback: React.ReactNode; source: string }) {
+  const plugin = useMermaidPlugin()
+  const renderId = `preview-mermaid-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const [result, setResult] = useState<{ error?: string; svg?: string }>({})
+
+  useEffect(() => {
+    let cancelled = false
+    setResult({})
+    plugin
+      .getMermaid()
+      .render(renderId, source)
+      .then(({ svg }) => {
+        if (!cancelled) {setResult({ svg })}
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {setResult({ error: error instanceof Error ? error.message : String(error) })}
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [plugin, renderId, source])
+
+  if (result.error) {
+    return (
+      <div className="grid gap-1">
+        <p className="text-xs text-destructive">Diagram could not be rendered: {result.error}</p>
+        {fallback}
+      </div>
+    )
+  }
+
+  if (!result.svg) {
+    return <p className="text-xs text-muted-foreground">Rendering diagram…</p>
+  }
+
+  // securityLevel 'strict' (lib/mermaid.ts) makes Mermaid sanitize the SVG.
+  return <div className="preview-mermaid overflow-auto" dangerouslySetInnerHTML={{ __html: result.svg }} />
 }
 
 const MARKDOWN_COMPONENTS = {
@@ -284,7 +335,7 @@ const MARKDOWN_COMPONENTS = {
   code: MarkdownCode
 }
 
-function MarkdownPreview({ text }: { text: string }) {
+export function MarkdownPreview({ text }: { text: string }) {
   return (
     <div className="preview-markdown mx-auto max-w-3xl px-4 py-3 text-sm text-foreground">
       <Streamdown components={MARKDOWN_COMPONENTS} controls={false} mode="static" parseIncompleteMarkdown={false}>

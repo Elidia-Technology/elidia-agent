@@ -31,11 +31,14 @@ restarting the agent or losing the conversation.
 
 **Switch models.** Pick from whatever models your Elidia install offers.
 
-**Open it from the activity bar.** Elidia adds its own icon to the left
-activity bar, opening a chat sidebar in place — the same way you reach Claude
-Code, Cline, or Copilot. From the empty state (or the sidebar's title bar) you
-can also launch the standalone **Desktop app** or the **CLI**; each opens its
-download page if it is not installed yet.
+**Open it three ways.** Elidia adds its own icon to the left activity bar,
+opening a chat sidebar in place — the same way you reach Claude Code, Cline, or
+Copilot. There is also an **Elidia** button in the status bar (bottom right) and
+the `Ctrl+Alt+E` / `Cmd+Alt+E` shortcut, both of which open the chat panel. The
+chat opens even before the agent is installed, and tells you inside it what is
+missing. From the empty state (or the sidebar's title bar) you can also launch
+the standalone **Desktop app** or the **CLI**; each opens its download page if
+it is not installed yet.
 
 ## Requirements
 
@@ -85,8 +88,9 @@ same wherever you use it.
 
 ## Troubleshooting
 
-**"No Elidia agent found"** — install it: `pip install "elidia-agent-cli[acp]"`,
-or point `elidia.acpPath` at the executable.
+**"No Elidia agent found"** — install it: `pip install "elidia-agent-cli[acp]"`
+(the error offers **Copy Install Command**), then run `Elidia: Restart Agent`, or
+point `elidia.acpPath` at the executable.
 
 **"Elidia is installed but the ACP extra is missing"** — you have the CLI without
 the protocol package. The same install command adds it.

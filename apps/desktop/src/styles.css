@@ -85,7 +85,9 @@
   --color-midground: var(--dt-midground);
   --color-midground-foreground: var(--dt-midground-foreground);
 
-  --font-sans: var(--dt-font-sans);
+  /* --user-font-sans (set by themes/fonts.ts) overrides the theme's font
+     family without applyTheme ever touching or clearing it. */
+  --font-sans: var(--user-font-sans, var(--dt-font-sans));
   --font-mono: var(--dt-font-mono);
 
   --spacing-mul: var(--dt-spacing-mul, 1);
@@ -420,14 +422,16 @@
   }
 
   html {
-    font-size: var(--dt-base-size, 0.875rem);
+    /* --user-font-scale (set by themes/fonts.ts) multiplies the theme's
+       base size; every rem-based size in the app cascades from this. */
+    font-size: calc(var(--dt-base-size, 0.875rem) * var(--user-font-scale, 1));
   }
 
   body {
     margin: 0;
     background: var(--ui-chat-surface-background);
     color: var(--dt-foreground);
-    font-family: var(--dt-font-sans);
+    font-family: var(--user-font-sans, var(--dt-font-sans));
     font-size: 0.8125rem;
     line-height: var(--dt-line-height, 1.55);
     letter-spacing: var(--dt-letter-spacing, 0);

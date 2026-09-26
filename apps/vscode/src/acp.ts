@@ -29,6 +29,9 @@ interface Pending {
 
 export class AcpUnavailableError extends Error {}
 
+/** The one command that installs the agent with its ACP adapter. */
+export const ACP_INSTALL_COMMAND = 'pip install "elidia-agent-cli[acp]"'
+
 export interface AcpLaunch {
   command: string
   args: string[]
@@ -125,12 +128,12 @@ export async function diagnoseMissingAcp(): Promise<string> {
     if (hasCli.ok) {
       return (
         'Elidia is installed but the ACP extra is missing. ' +
-        'Install it with `pip install "elidia-agent-cli[acp]"`.'
+        `Install it with \`${ACP_INSTALL_COMMAND}\`.`
       )
     }
   }
   return (
-    'No Elidia agent found. Install it with `pip install "elidia-agent-cli[acp]"`, ' +
+    `No Elidia agent found. Install it with \`${ACP_INSTALL_COMMAND}\`, ` +
     'or set `elidia.acpPath` to the `elidia-acp` executable.'
   )
 }
