@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Elidia Agent",
-  "version": "0.0.1",
+  "version": "2.5.0",
   "identifier": "com.aiutils.elidia.setup",
   "build": {
     "beforeDevCommand": "npm run dev",

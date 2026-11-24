@@ -1,7 +1,7 @@
 {
   "name": "@elidia/bootstrap-installer",
   "private": true,
-  "version": "0.0.1",
+  "version": "2.5.0",
   "description": "Elidia Setup — signed installer that drives scripts/install.ps1 with a polished native UI.",
   "type": "module",
   "scripts": {
