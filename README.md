@@ -58,6 +58,33 @@ Then start:
 elidia              # start chatting
 ```
 
+### ⬆️ Upgrade
+
+To move to the latest released version, re-run the install with `--upgrade`:
+
+```bash
+pip install --upgrade elidia-agent-cli
+```
+
+If you installed into an isolated tool environment, upgrade there instead:
+
+```bash
+uv tool upgrade elidia-agent-cli    # uv
+pipx upgrade elidia-agent-cli       # pipx
+```
+
+From inside the agent you can also check for a newer release without installing anything:
+
+```bash
+elidia update --check
+```
+
+> [!NOTE]
+> `elidia update` (without `--check`) is aimed at git checkouts and
+> `elidia profile install` distributions — it pulls source and reinstalls
+> dependencies rather than going through PyPI. If you installed with
+> `pip` / `uv` / `pipx`, use the `--upgrade` command for your tool above.
+
 > [!NOTE]
 > **Android / Termux:** see the [Termux guide](docs/termux.md). On Termux, install the curated extra that skips Android-incompatible voice dependencies:
 >
