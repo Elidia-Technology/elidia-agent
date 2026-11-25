@@ -38,8 +38,18 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      # Required for OIDC auth to Azure (azure/login federated credentials).
-      id-token: write
+
+    # UNSIGNED BUILD. The original flow logged into Azure and signed the exe via
+    # azure/artifact-signing-action (Trusted Signing), but those secrets/vars
+    # (AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID +
+    # AZURE_SIGNING_*) are not configured on this repo, so the sign step could
+    # not run. We ship the bootstrap installer unsigned — same posture as the
+    # mac/linux desktop artifacts — until the owner wires Trusted Signing. When
+    # that happens, re-add:
+    #   permissions: { id-token: write }   # for azure/login OIDC
+    #   - azure/login (client/tenant/subscription-id from secrets)
+    #   - azure/artifact-signing-action (endpoint/account/cert-profile from vars)
+    # between "Build installer" and the upload steps below.
 
     steps:
       - name: Checkout code
@@ -62,39 +72,46 @@ jobs:
         with:
           workspaces: apps/bootstrap-installer/src-tauri
 
-      - name: Build installer
-        run: npm run tauri:build
+      # Targeting nsis explicitly: bundle.targets in tauri.conf.json now includes
+      # "nsis" (added for this build), but passing --bundles nsis makes the intent
+      # unambiguous and skips the mac/linux targets that are meaningless on a
+      # Windows runner.
+      - name: Build installer (unsigned NSIS bundle)
+        run: npm run tauri:build -- --bundles nsis
         working-directory: apps/bootstrap-installer
 
-      - name: Azure login (OIDC)
-        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5  # v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Sign Elidia-Setup.exe with Azure Artifact Signing
-        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2
-        with:
-          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERTIFICATE_PROFILE }}
-          # Sign both the raw exe and the bundled NSIS installer.
-          files-folder: ${{ github.workspace }}\apps\bootstrap-installer\src-tauri\target\release
-          files-folder-filter: exe
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
+      # Producing a file is not evidence — verify the NSIS bundle and the raw
+      # bootstrap exe actually exist before we try to publish them. The bundle
+      # lands under target/release/bundle/nsis/; the raw [[bin]] exe
+      # (Elidia-Setup.exe, from Cargo.toml) lands under target/release/.
+      - name: Verify build artifacts exist
+        shell: pwsh
+        run: |
+          $nsis = Get-ChildItem 'apps/bootstrap-installer/src-tauri/target/release/bundle/nsis/*.exe' -ErrorAction SilentlyContinue
+          if (-not $nsis) {
+            Write-Host "::error::no NSIS bundle .exe produced under bundle/nsis/"
+            Get-ChildItem 'apps/bootstrap-installer/src-tauri/target/release' -Recurse -Filter *.exe |
+              Select-Object -ExpandProperty FullName
+            exit 1
+          }
+          Write-Host "NSIS bundle: $($nsis.FullName) ($([math]::Round($nsis.Length/1MB,1)) MB)"
+          $raw = Get-ChildItem 'apps/bootstrap-installer/src-tauri/target/release/Elidia-Setup.exe' -ErrorAction SilentlyContinue
+          if ($raw) {
+            Write-Host "raw exe:     $($raw.FullName) ($([math]::Round($raw.Length/1MB,1)) MB)"
+          } else {
+            Write-Warning "raw Elidia-Setup.exe not at target/release root (bundle-only build) — NSIS installer is the shipped artifact"
+          }
 
       - name: Upload NSIS installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: Elidia-Setup-installer
           path: apps/bootstrap-installer/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
 
       - name: Upload raw exe
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: Elidia-Setup-exe
           path: apps/bootstrap-installer/src-tauri/target/release/Elidia-Setup.exe
+          if-no-files-found: warn
