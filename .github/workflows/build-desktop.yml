@@ -127,11 +127,12 @@ jobs:
       - name: Verify Authenticode signature on installer + MSI
         shell: pwsh
         run: |
-          $targets = @(
-            Get-ChildItem 'apps/desktop/release/*.exe' |
-              Where-Object { $_.Name -notlike '*__uninstaller*' },
-            Get-ChildItem 'apps/desktop/release/*.msi'
-          )
+          # NB: build the target list with pipelines into a variable — a pipeline
+          # inside @( ... ) with a trailing comma is a PowerShell parse error.
+          $targets = @()
+          $targets += Get-ChildItem 'apps/desktop/release/*.exe' |
+            Where-Object { $_.Name -notlike '*__uninstaller*' }
+          $targets += Get-ChildItem 'apps/desktop/release/*.msi'
           $fail = $false
           foreach ($f in $targets) {
             $sig = Get-AuthenticodeSignature -FilePath $f.FullName
