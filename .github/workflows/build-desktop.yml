@@ -13,9 +13,13 @@ name: Build Elidia Agent Desktop
 #                     repo secret, never in this file — this workflow is public).
 #   PROD_USER       : SSH user for that host (likewise secret-only).
 #
-# NOTE: signing/notarization (mac hardenedRuntime + afterSign notarize.cjs,
-#       Windows code signing) is intentionally NOT wired here yet. This produces
-#       unsigned installers; signing is a follow-up once certs are provisioned.
+# NOTE on signing: Windows .exe/.msi carry a self-signed Authenticode signature
+# (ephemeral cert generated in build-win below -> CSC_LINK). It proves the
+# binary is intact and from this build but does NOT remove SmartScreen warnings
+# — only a trusted-CA/EV cert would. macOS is unsigned (no Apple Developer
+# account; notarization via afterSign/notarize.cjs is skipped with
+# ELIDIA_SKIP_NOTARIZE). Linux AppImage/deb/rpm are unsigned (electron-builder
+# 26.8.1 has no AppImage GPG signing).
 
 on:
   workflow_dispatch:
@@ -110,13 +114,36 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run dist:win
-      - name: Verify Authenticode signature on the installer
+      # Verify a signature is PRESENT on the two files users actually install.
+      #
+      # Check the NSIS installer .exe and the .msi — NOT the inner
+      # release/win-unpacked/Elidia.exe (that glob used to match the unpacked
+      # exe first and report on the wrong file). We assert on the presence of a
+      # SignerCertificate rather than the Status enum because a self-signed cert
+      # is not in the runner's trusted root, so Get-AuthenticodeSignature
+      # reports Status=UnknownError (chain can't be built) even when a valid
+      # signature is embedded. Presence of a signer proves "this build signed
+      # it"; trust is a separate concern only a paid CA cert would add.
+      - name: Verify Authenticode signature on installer + MSI
         shell: pwsh
         run: |
-          $exe = Get-ChildItem 'apps/desktop/release/*.exe' | Select-Object -First 1
-          $status = (Get-AuthenticodeSignature -FilePath $exe.FullName).Status
-          Write-Host "signature status: $status on $($exe.Name)"
-          if ($status -ne 'Valid') { Write-Warning "signature not Valid: $status (self-signed is expected to be Valid)" }
+          $targets = @(
+            Get-ChildItem 'apps/desktop/release/*.exe' |
+              Where-Object { $_.Name -notlike '*__uninstaller*' },
+            Get-ChildItem 'apps/desktop/release/*.msi'
+          )
+          $fail = $false
+          foreach ($f in $targets) {
+            $sig = Get-AuthenticodeSignature -FilePath $f.FullName
+            $signed = $null -ne $sig.SignerCertificate
+            Write-Host ("{0}: signed={1} status={2}" -f $f.Name, $signed, $sig.Status)
+            if (-not $signed) { $fail = $true }
+          }
+          if ($fail) {
+            Write-Warning "at least one installer is UNSIGNED"
+            exit 1
+          }
+          Write-Host "both the NSIS installer and the MSI carry an Authenticode signature"
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:

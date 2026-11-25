@@ -1,41 +1,33 @@
 /**
  * after-pack.cjs — electron-builder afterPack hook.
  *
- * Stamps the Elidia icon + identity onto the packed Windows Elidia.exe via
- * rcedit (delegated to set-exe-identity.cjs). This runs for EVERY packed build
- * — first install, `elidia desktop`, the installer's --update rebuild, and a
- * dev's manual `npm run pack` — so the branded exe can never silently revert
- * to the stock "Electron" icon/name (the bug when the stamp lived only in
- * install.ps1, which the update path doesn't use).
+ * HISTORICAL ROLE (now retired for Windows): this used to rcedit the Elidia
+ * icon + identity onto the packed Windows Elidia.exe, because
+ * build.win.signAndEditExecutable was set to `false` to dodge a winCodeSign
+ * 7-Zip symlink crash on non-admin local Windows (see set-exe-identity.cjs).
+ * That left the stock "Electron" icon, so this hook re-stamped it by hand.
  *
- * Windows-only: rcedit edits PE resources, irrelevant on macOS/Linux where the
- * app identity comes from the bundle Info.plist / desktop entry. Best-effort:
- * a stamp failure must never fail an otherwise-good build (worst case is the
- * stock icon, not a broken app), so we log and resolve rather than throw.
+ * WHY IT NO LONGER EDITS WINDOWS: signing is now ON (signAndEditExecutable
+ * removed => defaults to true) so electron-builder runs its OWN
+ * signAndEditResources for win32 — which applies rcedit (icon, ProductName,
+ * FileDescription, CompanyName from `author`, LegalTrademarks, copyright) and
+ * THEN signs the exe in the same step. A second rcedit here — after that
+ * signature is applied — would mutate the PE and INVALIDATE the Authenticode
+ * signature we just paid to add. So Windows must not re-edit here.
+ * electron-builder's native pass already stamps everything this hook used to:
+ *   icon     <- build.icon ("assets/icon" -> assets/icon.ico)
+ *   ProductName / FileDescription <- productName ("Elidia Agent")
+ *   CompanyName <- author ("AiUtils"); LegalTrademarks <- build.win.legalTrademarks
  *
- * electron-builder passes a context with:
- *   - electronPlatformName: 'win32' | 'darwin' | 'linux'
- *   - appOutDir:            the unpacked app directory for this target
- *   - packager.appInfo.productFilename: the exe basename (e.g. 'Elidia')
+ * macOS/Linux are untouched: rcedit is a PE-resource editor and irrelevant
+ * there (identity comes from Info.plist / the .desktop entry), so the hook
+ * remains a no-op off Windows.
  */
 
-const path = require('node:path')
-
-const { stampExeIdentity } = require('./set-exe-identity.cjs')
-
 exports.default = async function afterPack(context) {
-  if (context.electronPlatformName !== 'win32') {
+  if (context.electronPlatformName === 'win32') {
+    // Signed by electron-builder's signAndEditResources in the same pass —
+    // do NOT rcedit again here or the Authenticode signature is invalidated.
     return
-  }
-
-  const productName = context.packager?.appInfo?.productFilename || 'Elidia'
-  const exe = path.join(context.appOutDir, `${productName}.exe`)
-  const desktopRoot = path.resolve(__dirname, '..')
-
-  try {
-    await stampExeIdentity(exe, desktopRoot)
-  } catch (err) {
-    // Never fail the build over a cosmetic stamp.
-    console.warn(`[after-pack] exe identity stamp failed (${err.message}); Elidia.exe keeps the stock Electron icon`)
   }
 }
