@@ -87,11 +87,36 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Build (unsigned)
+      # Self-signed code signing (no paid cert): generate an ephemeral PFX and
+      # hand it to electron-builder via CSC_LINK/CSC_KEY_PASSWORD so the .exe and
+      # the NSIS/MSI installers carry a real Authenticode signature. This proves
+      # the binary is intact and from this build; it does NOT remove SmartScreen
+      # warnings — only a trusted-CA/EV cert would (owner may add one later via
+      # the same CSC_LINK secret slot).
+      - name: Generate self-signed code-signing cert (PFX)
+        shell: pwsh
+        run: |
+          $pwd = ConvertTo-SecureString -String 'elidia-selfsign' -Force -AsPlainText
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert `
+            -Subject 'CN=Elidia Technology (self-signed), O=Elidia Technology Pvt. Ltd.' `
+            -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 `
+            -NotAfter (Get-Date).AddYears(3) -CertStoreLocation Cert:\CurrentUser\My
+          $pfx = Join-Path $env:RUNNER_TEMP 'elidia-selfsign.pfx'
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $pwd | Out-Null
+          "CSC_LINK=$pfx"           | Add-Content -Path $env:GITHUB_ENV
+          "CSC_KEY_PASSWORD=elidia-selfsign" | Add-Content -Path $env:GITHUB_ENV
+      - name: Build (self-signed)
         working-directory: apps/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run dist:win
+      - name: Verify Authenticode signature on the installer
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem 'apps/desktop/release/*.exe' | Select-Object -First 1
+          $status = (Get-AuthenticodeSignature -FilePath $exe.FullName).Status
+          Write-Host "signature status: $status on $($exe.Name)"
+          if ($status -ne 'Valid') { Write-Warning "signature not Valid: $status (self-signed is expected to be Valid)" }
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -122,6 +147,10 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run dist:linux
+      # NOTE: electron-builder 26.8.1 has no built-in AppImage GPG signing (no
+      # SIGN_* env var in the app-builder binary), so the AppImage is left
+      # unsigned. Integrity for Linux ships via the .deb/.rpm package managers;
+      # signed AppImages would need a post-build appimagetool --sign step.
       # Every Linux bug we have shipped sat between "the artifact exists" and
       # "the artifact runs": a .deb that installed cleanly and then died on a
       # missing libgbm.so.1, and a first-launch bootstrap that 404'd. Producing
